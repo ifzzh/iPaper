@@ -23,7 +23,7 @@ python scripts/backup_processing.py \
 
 ## 功能版本回退
 
-本次基线为 iPaper 1.1.4，不运行品牌改名时期的迁移回退脚本，也不改回 PaperPilot 路径。
+1.2.0 发布时的历史回退基线为 1.1.4；1.3.0 的回退基线为本次切换前的 1.2.0 兼容组件组合。每次以新备份中的实际摘要为准，不运行品牌改名时期的迁移回退脚本，也不改回 PaperPilot 路径。
 
 ```sh
 sudo -n python3 /PERSISTENT_BACKUP/rollback.py --backup /PERSISTENT_BACKUP
@@ -47,3 +47,11 @@ sudo -n python3 /PERSISTENT_BACKUP/rollback.py --backup /PERSISTENT_BACKUP --app
 本次发布回退基线目录为 `/mnt/raid1/backups/ipaper/releases/1.2.0-20260913T011653Z`，其 `rollback.py` 独立可执行，默认 dry-run。它恢复 Web/Translation/Document 1.1.4 的独立仓库摘要及配置、回退 Web latest，继续使用当前数据库和产物。完整数据/配置备份及工具文件均受限；不要使用早期品牌迁移回退程序。
 
 一次性产物提升容器需要读取私有验收目录并给新文件设置 Web 所有者。本次仅该无网络、非驻留容器增加 `DAC_OVERRIDE`/`CHOWN`，正式三服务仍非 root、`cap_drop: ALL`。正式数据库含容器内 `/data/papers` 绝对引用，提升应使用相同容器挂载映射，不能将宿主路径直接套用。
+
+## 1.3.0 单篇分析的新增备份范围
+
+本阶段候选基线是已部署的 1.2.0。备份逻辑增加 `understanding_artifacts` 清单中的正文快照、授权图片、分析修订、分段检查点和离线导出；证据和问答范围索引随 SQLite 一致性快照保存。没有新增加密用途或密钥表，概览与解读引用现有 interpret 凭据。
+
+发布前必须重新记录当时三个组件和活动任务，不使用上述历史 1.2.0 发布目录去回退本阶段。回退继续保留当前数据库的理解索引及文件；1.2.0 不识别这些表但可以继续读写原有功能。详细本轮备份路径在完成正式切换后写入新 Release 与交付记录。
+
+1.3.0 使用 `scripts/promote_understanding_acceptance.py` 单独提升已批准且通过真实验收的概览、长解读、证据、任务和两次问答。默认只校验，要求目标论文及现有解析版本完全匹配、凭据修订不变、没有既有分析头或活动任务；不复制账户、配置、密钥或旧解析，不覆盖已有结果。先完成一致性备份和停写，再执行明确的 `--apply`；私有样本不得附到 Release。

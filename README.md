@@ -17,6 +17,9 @@ Existing services provide library management, BabelDOC translation, MinerU parsi
 
 A version number or screen on the development branch does not establish release availability. Consult the target [Release](https://github.com/ifzzh/iPaper/releases) for shipped capabilities, known issues and verification. Planned features below are not presented as complete.
 
+
+The 1.3.0 candidate adds separate AI overviews and detailed interpretations, shared original-text evidence, local/whole-paper question scopes, and Markdown/image-package/browser-print exports. Generation is explicit; existing results are read without paid requests. See [single-paper understanding](docs/development/single-paper-understanding.md) for scope and limitations. Publication and deployment are still pending acceptance.
+
 ## Capabilities and direction
 
 | Area | Available now | Further development |

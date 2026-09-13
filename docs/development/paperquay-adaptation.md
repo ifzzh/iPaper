@@ -43,3 +43,9 @@
 | 块选择与引用跳转 | `processing/sources.py`、`Chat.tsx` | 源文字范围在服务端核实；只有本次上下文映射允许产生回答引用，历史保持可追溯 |
 
 公式使用原生 MathML；没有引入上游笔记、Agent、Electron IPC 或桌面文件权限。具体模型和坐标约束见 [双翻译契约](dual-translation.md)。
+
+## 1.3.0 单篇理解适配
+
+固定 PaperQuay `1d65fdbfe0eb7ef33c57cf8b9d87b6afdb5f06bf` 的 `SummaryPanel`、summary source/agent context 流程作为分区、信息密度、来源和更新状态参考。`frontend/src/Understanding.tsx` 在现有论文标签中独立实现六部分概览、长篇解读、共用问答和来源往返；Electron summary IPC、文件系统、桌面数据库和模型密钥均未搬入。
+
+后端由 `ipaper/processing/understanding*.py` 接现有 interpret 与原文快照，概览/长解读分别保存。长解读沿用 PaperPilot 原有图文详细解释意图，未以 SummaryPanel 的速读卡替代。来源、许可及独立实现策略不变；没有更改项目许可证，也没有以不同目录名宣称 AGPL 与现有许可自动兼容。细节见 [单篇理解说明](single-paper-understanding.md)。
