@@ -295,6 +295,7 @@
   html:has(body.analysis-printing),
   body.analysis-printing,
   .analysis-printing #root {
+    color-scheme: light !important;
     background: white !important;
     height: auto !important;
     min-height: 0 !important;

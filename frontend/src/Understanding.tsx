@@ -522,7 +522,9 @@ export function PaperWorkspace(
                   )}
                   {detail.data.result.status === "partial" && (
                     <p className="notice">
-                      此结果仅覆盖已完成部分，不能作为全文分析。请查看任务日志和正文范围。
+                      已完成 {body?.coveredChunks ?? "部分"} /{" "}
+                      {body?.totalChunks ?? "未知"}{" "}
+                      个正文分段，不能作为全文分析。请查看任务日志和来源范围。
                     </p>
                   )}
                   <p className="analysis-input-note">
@@ -744,7 +746,7 @@ export function PaperWorkspace(
       {parse && (
         <TranslationDialog
           paper={props.paper}
-          initial="structure"
+          initial="parse"
           onClose={() => {
             setParse(false);
             content.refresh();

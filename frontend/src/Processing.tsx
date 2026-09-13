@@ -237,7 +237,13 @@ export function TranslationDialog({
   }
   return (
     <Modal
-      title={blockId ? "重新翻译此块" : "生成论文翻译"}
+      title={
+        blockId
+          ? "重新翻译此块"
+          : kind === "parse"
+            ? "准备论文解析"
+            : "生成论文翻译"
+      }
       onClose={onClose}
       wide
     >

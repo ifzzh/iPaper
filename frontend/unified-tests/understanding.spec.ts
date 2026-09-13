@@ -26,6 +26,15 @@ test("single paper overview, interpretation, source return, QA and offline expor
   await expect(
     page.getByRole("button", { name: "退出登录", exact: true }),
   ).toBeVisible();
+  await page
+    .locator(".empty-state")
+    .getByRole("button", { name: "准备解析正文", exact: true })
+    .click();
+  await expect(page.getByLabel("仅解析结构，不调用翻译模型")).toBeChecked();
+  await expect(
+    page.getByRole("button", { name: "开始解析", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("dialog").getByLabel("关闭", { exact: true }).click();
   const csrf = (await page.context().cookies()).find(
     (c) => c.name === "paperpilot_csrf",
   )!.value;
@@ -147,6 +156,10 @@ test("single paper overview, interpretation, source return, QA and offline expor
   await expect(page.locator(".message.assistant")).toContainText(
     "合成来源回答",
   );
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = "dark";
+  });
+  await page.waitForTimeout(200);
   await page.evaluate(() => {
     window.print = () => {
       document.documentElement.dataset.printInvoked = "yes";
