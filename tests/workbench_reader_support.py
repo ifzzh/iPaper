@@ -50,6 +50,7 @@ def fake_openai():
                     markdown += '\n\n$$E = mc^2$$\n\n| 方法 | 得分 |\n| --- | --- |\n| Ours | 95.2 |'
                     if '公众号风格图文长解读' in system:
                         markdown += '\n\n## 方法与实验的详细说明\n\n' + ('这段合成说明用于核对长篇阅读与分页，依据已提供的实验文字；不代表真实论文结论。'+cite+'\n\n')*25
+                    markdown += ''.join('\n\n![论文图示，仅引用已提供图片]('+u['image']+')' for u in units if u.get('image'))
                     content = {'markdown':markdown,'evidence':evidence}
                 else:
                     if not isinstance(units,list):

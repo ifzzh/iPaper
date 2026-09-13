@@ -32,6 +32,7 @@ def understanding_app(application, monkeypatch):
         else:
             evidence = []
             markdown = "## 背景与问题\n\n合成概览。"
+        markdown += "\n\n![unverified](/api/paper/a-0/analysis/image?path=other.png)"
         calls.append({"messages": messages, "output": output})
         return {
             "status": "completed",
@@ -89,6 +90,7 @@ def test_complete_parse_is_reused_for_independent_analysis_and_export(
     value = c.get("/api/paper/a-4/understanding/" + deep["resultId"]).json["result"]
     assert value["body"]["sources"]
     assert "[S99999]" not in value["body"]["markdown"]
+    assert r"\![unverified]" in value["body"]["markdown"]
     source = next(iter(value["body"]["sources"].values()))["sourceId"]
     assert c.get("/api/sources/" + source).json["source"]["canNavigate"]
     n = len(understanding_app.understanding_calls)

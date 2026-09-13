@@ -507,6 +507,17 @@ class Understanding:
                 for label, value in out["sources"].items()
             }
             markdown = "\n\n".join(o["markdown"] for o in outputs)
+            # A model may reference only images in this immutable paper snapshot.
+            # Same-origin URLs are not sufficient proof of the correct figure.
+            from .understanding_export import safe_offline_markdown
+
+            snapshot = self.files.row(request["snapshotId"])
+            images = {
+                e["path"]
+                for e in json.loads(snapshot["manifest_json"])["entries"]
+                if e["path"].startswith("images/")
+            }
+            markdown = safe_offline_markdown(markdown, images)
             status = (
                 "partial"
                 if errors or not source["coverage"]["complete"]

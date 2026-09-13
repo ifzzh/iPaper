@@ -480,7 +480,7 @@ export function PaperWorkspace(
                     <span>
                       {detail.data.result.status === "historical"
                         ? "历史结果 · 配置与覆盖范围未知"
-                        : `${processingNames[detail.data.result.status] || detail.data.result.status} · ${timestampText(detail.data.result.createdAt)} · ${detail.data.result.model} · ${detail.data.result.language}`}
+                        : `${processingNames[detail.data.result.status] || detail.data.result.status} · ${timestampText(detail.data.result.createdAt)} · ${detail.data.result.model} · ${detail.data.result.language === "zh" ? "简体中文" : detail.data.result.language === "en" ? "英语" : detail.data.result.language}`}
                     </span>
                     <select
                       aria-label="分析版本"
@@ -526,7 +526,9 @@ export function PaperWorkspace(
                     </p>
                   )}
                   <p className="analysis-input-note">
-                    依据解析原文、表格文字与图注生成；模型未接收图片像素。
+                    {detail.data.result.status === "historical"
+                      ? "历史解读：生成时的上下文范围与图像输入方式未记录。"
+                      : "依据解析原文、表格文字与图注生成；模型未接收图片像素。"}
                   </p>
                   <Markdown
                     text={body?.markdown || ""}
@@ -694,7 +696,12 @@ export function PaperWorkspace(
               {preview ? (
                 <div className="generation-budget">
                   <p>
-                    模型：{preview.model} · 输出语言：{preview.language}
+                    模型：{preview.model} · 输出语言：
+                    {preview.language === "zh"
+                      ? "简体中文"
+                      : preview.language === "en"
+                        ? "英语"
+                        : preview.language}
                   </p>
                   <p>
                     正文 {preview.estimate.sourceUnits} 个单元，
