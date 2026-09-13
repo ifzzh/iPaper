@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { PdfReader } from "./Reader";
 import { Chat, type Excerpt } from "./Chat";
-import { api, Status, useResource, timestampText } from "./ui";
+import { api, Status, useResource, timestampText, Modal } from "./ui";
 import { errorText, ApiError } from "./api";
 import {
   TranslationDialog,
@@ -84,6 +84,7 @@ export function Reader(props: ReaderProps) {
     [source, setSource] = useState<Source | null>(null),
     [sourceError, setSourceError] = useState(""),
     [returnTo, setReturnTo] = useState<string | null>(null);
+  const [sourceExcerpt, setSourceExcerpt] = useState<any>(null);
   const results = useResource<{
     results: ProcessingResult[];
     registrationWarning?: string;
@@ -92,6 +93,17 @@ export function Reader(props: ReaderProps) {
   });
   const alive = useRef(true),
     navigation = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (props.sourceTarget) {
+      setSource({
+        ...props.sourceTarget,
+        document: "original",
+        canNavigate: true,
+        stale: false,
+      } as Source);
+      setMode("original");
+    }
+  }, [props.sourceTarget?.id]);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -150,6 +162,10 @@ export function Reader(props: ReaderProps) {
       );
       if (c.signal.aborted) return;
       if (!r.source.canNavigate) {
+        if (r.source.text) {
+          setSourceExcerpt(r.source);
+          return;
+        }
         setSourceError(
           r.source.stale
             ? "原始文件已变化，保留的内容仍可读，当前来源无法定位。"
@@ -230,6 +246,16 @@ export function Reader(props: ReaderProps) {
   );
   return (
     <>
+      {sourceExcerpt && (
+        <Modal title="来源摘录" onClose={() => setSourceExcerpt(null)}>
+          <p>
+            {sourceExcerpt.stale
+              ? "原始文件已变化，以下为保存的原文摘录。"
+              : "此来源没有可靠的 PDF 页码或区域，保留原文供核对。"}
+          </p>
+          <p className="source-excerpt">{sourceExcerpt.text}</p>
+        </Modal>
+      )}
       {results.data.registrationWarning && (
         <p className="notice">
           版式译文版本信息暂时无法读取，已保留现有文件。

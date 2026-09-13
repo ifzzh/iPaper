@@ -76,6 +76,7 @@ const stages: Record<string, string> = {
   normalizing: "校验并整理结构",
   parsed: "解析完成",
   translating: "翻译结构块",
+  understanding: "阅读原文并生成解读",
   completed: "完成",
 };
 export function TranslationDialog({

@@ -3,7 +3,7 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   ...base,
   testDir: "./unified-tests",
-  testIgnore: "structured.spec.ts",
+  testIgnore: ["structured.spec.ts", "understanding.spec.ts"],
   use: {
     ...base.use,
     launchOptions: { executablePath: "/opt/microsoft/msedge/msedge" },

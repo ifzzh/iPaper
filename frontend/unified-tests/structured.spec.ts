@@ -51,7 +51,9 @@ test("dual translation source workflow with isolated fake suppliers", async ({
   await expect(page.locator("math").first()).toBeVisible();
   const notation = page.locator(".structure-paragraph sup").first();
   await expect(notation).toHaveText("*");
-  await expect(page.locator(".structure-paragraph sub").first()).toHaveText("2");
+  await expect(page.locator(".structure-paragraph sub").first()).toHaveText(
+    "2",
+  );
   await notation.evaluate((node) => {
     const range = document.createRange();
     range.selectNodeContents(node);
@@ -160,8 +162,11 @@ test("dual translation source workflow with isolated fake suppliers", async ({
       ).toBe(true);
     }
   }
-  // Mobile send without a highlighted quote uses only verified visible context.
+  // Explicit local mode without a highlighted quote uses verified visible context.
   await page.getByRole("button", { name: "论文问答", exact: true }).click();
+  await page
+    .getByRole("button", { name: "选区／当前段落", exact: true })
+    .click();
   await page
     .getByLabel("你的问题", { exact: true })
     .fill("解释当前内容并给出来源。");

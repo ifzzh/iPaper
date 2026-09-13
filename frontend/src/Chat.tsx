@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { errorText, isSessionError, request } from "./api";
 import { postChat, readChatStream } from "./chat-stream";
-import { Markdown, Confirm } from "./ui";
+import { Markdown, Confirm, useResource } from "./ui";
 import { AcademicText } from "./MathFormula";
 import {
   MessageSquare,
@@ -17,12 +17,20 @@ export type Excerpt = {
   document: string;
   title: string;
   sourceId?: string;
+  locationLabel?: string;
 };
 
 type Message = {
   role: "user" | "assistant";
   content: string;
   sources?: { label: string; sourceId: string }[];
+  scope?: {
+    mode: string;
+    usedUnits?: number;
+    availableUnits?: number;
+    selectionLimited?: boolean;
+    imageInput?: boolean;
+  };
 };
 type Session = { id: string; title: string };
 function messagesFrom(value: unknown): Message[] {
@@ -37,10 +45,11 @@ function messagesFrom(value: unknown): Message[] {
     .map((v) => ({
       role: v.role,
       content: v.content,
+      scope: v.scope,
       sources: Array.isArray(v.sources)
         ? v.sources.filter(
             (s) =>
-              /^S[1-9][0-9]{0,2}$/.test(s.label) &&
+              /^S[1-9][0-9]{0,5}$/.test(s.label) &&
               typeof s.sourceId === "string",
           )
         : [],
@@ -69,6 +78,15 @@ export function Chat({
 }) {
   const [sessions, setSessions] = useState<Session[]>([]),
     [id, setId] = useState(initialSession);
+  const [scope, setScope] = useState<"paper" | "local">("paper"),
+    [allowPartial, setAllowPartial] = useState(false);
+  const content = useResource<any>(
+    `/api/paper/${encodeURIComponent(paperId)}/content`,
+    {},
+  );
+  useEffect(() => {
+    if (excerpt) setScope("local");
+  }, [excerpt]);
   const [messages, setMessages] = useState<Message[]>([]),
     [draft, setDraft] = useState(
       drafts?.get(paperId + "|" + initialSession) || "",
@@ -87,6 +105,19 @@ export function Chat({
     restoreScroll = useRef<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [away, setAway] = useState(false);
+  const lastTurn = useRef("");
+  function rememberSession(sessionId: string) {
+    onSessionChange?.(sessionId);
+    void request(
+      `/api/paper/${encodeURIComponent(paperId)}/understanding-position`,
+      undefined,
+      "PUT",
+      { sessionId: sessionId || null },
+      true,
+    ).catch(() => {
+      setNotice("会话已保留，但会话选择保存失败，可从历史列表重新打开。");
+    });
+  }
   useEffect(() => {
     if (
       restoreScroll.current !== null &&
@@ -160,10 +191,11 @@ export function Chat({
     setMessages([]);
     setPending("");
     setDraft(drafts?.get(paperId + "|" + sessionId) || "");
-    onSessionChange?.(sessionId);
+    rememberSession(sessionId);
     setLoading(true);
     setNotice("");
     try {
+      await list(c.signal, seq);
       if (sessionId) {
         const result = await history(sessionId, c.signal);
         if (valid(seq)) setMessages(result);
@@ -192,8 +224,23 @@ export function Chat({
     }
   }
   useEffect(() => {
-    void refresh();
+    const c = new AbortController();
+    void request(
+      `/api/paper/${encodeURIComponent(paperId)}/understanding-position`,
+      c.signal,
+    )
+      .then((v: any) => {
+        if (!c.signal.aborted) {
+          const chosen = v.sessionId ?? initialSession;
+          if (chosen) void choose(chosen);
+          else void refresh();
+        }
+      })
+      .catch(() => {
+        if (!c.signal.aborted) void refresh();
+      });
     return () => {
+      c.abort();
       epoch.current++;
       controller.current?.abort();
       stream.current?.abort();
@@ -201,6 +248,18 @@ export function Chat({
   }, [paperId]);
   async function send() {
     if (sending.current || loading || !draft.trim()) return;
+    if (scope === "local" && !excerpt?.sourceId && !prepareSources) {
+      setNotice("请先选择文字或一个结构段落，再进行局部问答。");
+      return;
+    }
+    if (
+      scope === "paper" &&
+      (!content.data.available ||
+        (!content.data.coverage?.complete && !allowPartial))
+    ) {
+      setNotice("请先核对解析正文及实际覆盖范围。");
+      return;
+    }
     const { c, seq } = begin();
     sending.current = true;
     setBusy(true);
@@ -209,8 +268,8 @@ export function Chat({
     const userMessage: Message = {
       role: "user",
       content:
-        (excerpt
-          ? `引用《${excerpt.title}》${excerpt.document === "translated" ? "译文" : "原文"}第 ${excerpt.page} 页：\n> ${excerpt.text.replace(/\n/g, "\n> ")}\n\n`
+        (excerpt && scope === "local"
+          ? `引用《${excerpt.title}》${excerpt.locationLabel || `${excerpt.document === "translated" ? "译文" : "原文"}第 ${excerpt.page} 页`}：\n> ${excerpt.text.replace(/\n/g, "\n> ")}\n\n`
           : "") + draft.trim(),
     };
     onClearExcerpt?.();
@@ -225,15 +284,27 @@ export function Chat({
     const sc = new AbortController();
     stream.current = sc;
     try {
-      const sourceIds = excerpt?.sourceId
-        ? [excerpt.sourceId]
-        : await prepareSources?.(sc.signal);
+      const sourceIds =
+        scope === "local"
+          ? excerpt?.sourceId
+            ? [excerpt.sourceId]
+            : await prepareSources?.(sc.signal)
+          : undefined;
       if (sc.signal.aborted || !valid(seq))
         throw new DOMException("Aborted", "AbortError");
+      lastTurn.current = crypto.randomUUID();
       const response = await postChat(
         {
           paper_id: paperId,
           messages: [...original, userMessage],
+          scope,
+          request_id: lastTurn.current,
+          ...(scope === "paper"
+            ? {
+                content_version: content.data.version,
+                allow_partial: allowPartial,
+              }
+            : {}),
           ...(id ? { session_id: id } : {}),
           ...(sourceIds?.length ? { source_ids: sourceIds } : {}),
         },
@@ -246,7 +317,7 @@ export function Chat({
           sessionId = next;
           if (valid(seq)) {
             setId(next);
-            onSessionChange?.(next);
+            rememberSession(next);
           }
         },
         (text) => {
@@ -284,12 +355,21 @@ export function Chat({
                     ? "已停止接收；历史中已有保存的回答。"
                     : "已读取服务端保存的历史。",
                 );
-              } else
+              } else {
+                const turn: any = lastTurn.current
+                  ? await request(
+                      `/api/paper/chat/turns/${lastTurn.current}`,
+                      c.signal,
+                    ).catch(() => null)
+                  : null;
                 setNotice(
                   stopped
                     ? "已停止接收，服务端可能继续处理；回答未确认保存。可稍后刷新历史。"
-                    : "回答未确认保存，可刷新历史核对；不会自动重发。",
+                    : turn?.errorCode
+                      ? `回答未保存：${errorText({ code: turn.errorCode })} 不会自动重发。`
+                      : "回答未确认保存，可刷新历史核对；不会自动重发。",
                 );
+              }
             }
           } else if (valid(seq))
             setNotice("未获得会话编号，请刷新历史核对；不会自动重发。");
@@ -354,7 +434,28 @@ export function Chat({
         {messages.map((m, i) => (
           <div key={i} className={`message ${m.role}`}>
             <strong>{m.role === "user" ? "你" : "助手"}</strong>
-            <Markdown text={m.content} />
+            <Markdown
+              text={m.content}
+              sources={Object.fromEntries(
+                (m.sources || []).map((s) => [
+                  s.label,
+                  { sourceId: s.sourceId },
+                ]),
+              )}
+              onSource={onSource}
+            />
+            {m.scope && (
+              <p className="message-scope">
+                {m.scope.mode === "local" ? "局部问答" : "整篇论文问答"} ·
+                实际使用 {m.scope.usedUnits ?? "—"}
+                {m.scope.availableUnits
+                  ? ` / ${m.scope.availableUnits}`
+                  : ""}{" "}
+                个正文单元
+                {m.scope.selectionLimited ? " · 按问题选择的证据" : ""} ·
+                未发送图片像素
+              </p>
+            )}
             {!!m.sources?.length && (
               <nav className="source-links" aria-label="回答来源">
                 {m.sources.map((s) => (
@@ -409,8 +510,9 @@ export function Chat({
           <div className="excerpt-card">
             <div>
               <span>
-                引用 · {excerpt.document === "translated" ? "译文" : "原文"}第{" "}
-                {excerpt.page} 页
+                引用 ·{" "}
+                {excerpt.locationLabel ||
+                  `${excerpt.document === "translated" ? "译文" : "原文"}第 ${excerpt.page} 页`}
               </span>
               <button
                 type="button"
@@ -420,7 +522,9 @@ export function Chat({
                 <X size={14} />
               </button>
             </div>
-            <p><AcademicText text={excerpt.text} /></p>
+            <p>
+              <AcademicText text={excerpt.text} />
+            </p>
             {excerpt.sourceId && (
               <small>
                 本次将使用已核实的选区及相邻结构段落；回答中只有匹配来源的编号可以跳转。
@@ -428,10 +532,59 @@ export function Chat({
             )}
           </div>
         )}
-        {prepareSources && !excerpt && (
-          <small>
-            未选择文字时，使用当前结构块和相邻段落；不会自动检索或解析全文。
-          </small>
+        <div className="scope-control" aria-label="问答范围">
+          <button
+            type="button"
+            disabled={busy}
+            className={scope === "paper" ? "active" : ""}
+            onClick={() => {
+              setScope("paper");
+              onClearExcerpt?.();
+            }}
+          >
+            整篇论文
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            className={scope === "local" ? "active" : ""}
+            onClick={() => setScope("local")}
+          >
+            选区／当前段落
+          </button>
+        </div>
+        {scope === "paper" && (
+          <div className="scope-notice">
+            {content.loading ? (
+              "正在确认解析正文…"
+            ) : content.data.available ? (
+              <>
+                <span>
+                  {content.data.coverage?.complete
+                    ? `完整解析原文，共 ${content.data.coverage.totalPages} 页`
+                    : "可用正文的完整性未确认"}
+                  。译文完成数量不影响问答；长文按问题选择证据，最多两次模型请求。
+                </span>
+                {!content.data.coverage?.complete && (
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={allowPartial}
+                      onChange={(e) => setAllowPartial(e.target.checked)}
+                    />
+                    仅使用当前可用正文，理解覆盖范围有限。
+                  </label>
+                )}
+              </>
+            ) : (
+              <span>
+                当前没有可用正文。请先在概览页明确创建解析任务；不会自动解析。
+              </span>
+            )}
+          </div>
+        )}
+        {scope === "local" && prepareSources && !excerpt && (
+          <small>本次仅使用当前结构块和相邻段落。</small>
         )}
         <label htmlFor="question">你的问题</label>
         <textarea

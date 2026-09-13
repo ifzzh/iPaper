@@ -26,7 +26,7 @@ const Settings = lazy(() =>
 );
 const Daily = lazy(() => import("./Daily").then((m) => ({ default: m.Daily })));
 const Reader = lazy(() =>
-  import("./StructuredReader").then((m) => ({ default: m.Reader })),
+  import("./Understanding").then((m) => ({ default: m.PaperWorkspace })),
 );
 type View = "library" | "reader" | "daily" | "settings" | "tasks" | "analysis";
 const route = () => {
@@ -253,7 +253,11 @@ function App() {
           : null,
         theme,
         taskRefs,
-        readerResults: Object.fromEntries(Object.entries(preferences.current.readerResults || {}).filter(([id]) => tabs.includes(id))),
+        readerResults: Object.fromEntries(
+          Object.entries(preferences.current.readerResults || {}).filter(
+            ([id]) => tabs.includes(id),
+          ),
+        ),
         tabDocuments: Object.fromEntries(
           Object.entries(preferences.current.tabDocuments || {}).filter(
             ([id]) => tabs.includes(id),
@@ -280,7 +284,11 @@ function App() {
     layoutRevision,
   ]);
   useEffect(() => {
-    if (stateReady && locationState.view === "reader" && selectedPaper)
+    if (
+      stateReady &&
+      ["reader", "analysis"].includes(locationState.view) &&
+      selectedPaper
+    )
       setTabs((v) =>
         v.includes(selectedPaper.id) ? v : [...v.slice(-19), selectedPaper.id],
       );
@@ -452,7 +460,8 @@ function App() {
             <div
               className={
                 "paper-tab " +
-                (locationState.view === "reader" && id === locationState.paper
+                (["reader", "analysis"].includes(locationState.view) &&
+                id === locationState.paper
                   ? "active"
                   : "")
               }
@@ -461,7 +470,8 @@ function App() {
               <button
                 role="tab"
                 aria-selected={
-                  locationState.view === "reader" && id === locationState.paper
+                  ["reader", "analysis"].includes(locationState.view) &&
+                  id === locationState.paper
                 }
                 onClick={() =>
                   navigate(
@@ -520,7 +530,10 @@ function App() {
                 onChanged={changed}
                 onImport={() => setImporting(true)}
                 onTasks={(t) => (t ? task(t) : navigate("tasks"))}
-                onAnalysis={(p) => navigate("analysis", p.id)}
+                onAnalysis={(p) => {
+                  setTabs((v) => (v.includes(p.id) ? v : [...v, p.id]));
+                  navigate("analysis", p.id);
+                }}
                 loading={loading}
                 error={
                   error ||
@@ -532,10 +545,13 @@ function App() {
                 setFilter={setFilter}
               />
             )}
-            {locationState.view === "reader" &&
+            {["reader", "analysis"].includes(locationState.view) &&
               (selectedPaper ? (
                 <Suspense fallback={<Status loading />}>
                   <Reader
+                    initialView={
+                      locationState.view === "analysis" ? "analysis" : "reader"
+                    }
                     preferences={preferences.current}
                     onPreferences={updatePreferences}
                     key={selectedPaper.id}
@@ -560,14 +576,6 @@ function App() {
                   </button>
                 </div>
               ))}
-            {locationState.view === "analysis" && (
-              <Analysis
-                paperId={locationState.paper}
-                onRead={() => {
-                  if (selectedPaper) read(selectedPaper);
-                }}
-              />
-            )}
             {locationState.view === "daily" && (
               <Daily
                 onRead={(id) => {
@@ -632,40 +640,5 @@ function App() {
     </div>
   );
 }
-function Analysis({
-  paperId,
-  onRead,
-}: {
-  paperId: string;
-  onRead: () => void;
-}) {
-  const resource = useResource<any>(
-    paperId
-      ? "/api/paper/" + encodeURIComponent(paperId) + "/analysis/result"
-      : null,
-    {},
-  );
-  return (
-    <section className="analysis-page">
-      <header className="page-heading">
-        <div>
-          <span className="eyebrow">PAPER INSIGHTS</span>
-          <h1>{resource.data.title || "论文分析"}</h1>
-        </div>
-        <button onClick={onRead}>
-          <BookOpen size={16} />
-          阅读论文
-        </button>
-      </header>
-      <Status
-        error={resource.error}
-        loading={resource.loading}
-        retry={resource.refresh}
-      />
-      <article className="analysis-content">
-        <Markdown text={resource.data.content || ""} />
-      </article>
-    </section>
-  );
-}
+
 createRoot(document.getElementById("root")!).render(<App />);

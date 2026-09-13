@@ -527,22 +527,12 @@ export function Library({
               </button>
               <button
                 className="pipeline-action"
-                onClick={() =>
-                  paper.has_analysis_result
-                    ? onAnalysis(paper)
-                    : setAction("analyze")
-                }
+                onClick={() => onAnalysis(paper)}
               >
                 <Sparkles size={20} />
                 <span>
-                  <strong>
-                    {paper.has_analysis_result ? "查看分析" : "解析与分析"}
-                  </strong>
-                  <small>
-                    {paper.has_analysis_result
-                      ? "阅读已有分析结果"
-                      : "MinerU 解析与论文解读"}
-                  </small>
+                  <strong>概览与深度解读</strong>
+                  <small>复用解析原文，速读与深入理解</small>
                 </span>
                 <ChevronRight size={16} />
               </button>
@@ -613,7 +603,16 @@ export function Library({
           onSaved={onChanged}
         />
       )}
-      {action === "translate" && paper && <TranslationDialog paper={paper} onClose={()=>setAction("")} onSubmitted={()=>{onChanged();onTasks()}}/>}
+      {action === "translate" && paper && (
+        <TranslationDialog
+          paper={paper}
+          onClose={() => setAction("")}
+          onSubmitted={() => {
+            onChanged();
+            onTasks();
+          }}
+        />
+      )}
       {["analyze", "bulk-delete", "delete"].includes(action) && (
         <Confirm
           title={

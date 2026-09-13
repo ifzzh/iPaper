@@ -209,7 +209,7 @@ export function Tasks({
   onTask: (t: LocalTask) => void;
 }) {
   const translations = useResource<any>("/api/translations", { tasks: [] }),
-    structured = useResource<any>("/api/processing/jobs", {jobs:[]}),
+    structured = useResource<any>("/api/processing/jobs", { jobs: [] }),
     analysis = useResource<any>("/api/paper/analyze/active", { tasks: [] }),
     [selected, setSelected] = useState<any>(null),
     [error, setError] = useState("");
@@ -222,7 +222,20 @@ export function Tasks({
     return () => clearInterval(timer);
   }, []);
   const tasks = [
-    ...structured.data.jobs.map((j:any)=>({...j,kind:"structure",task_id:j.id,paper_id:j.paperId,title:"结构解析与翻译"})),
+    ...structured.data.jobs.map((j: any) => ({
+      ...j,
+      kind: "structure",
+      task_id: j.id,
+      paper_id: j.paperId,
+      title:
+        (
+          {
+            overview: "AI 概览",
+            interpretation: "深度解读",
+            analysis_export: "分析导出",
+          } as any
+        )[j.kind] || "结构解析与翻译",
+    })),
     ...(translations.data.tasks || []).map((t: any) => ({
       ...t,
       kind: "translation",
@@ -317,7 +330,19 @@ export function Tasks({
           <p>从文献详情开始翻译或分析，进度将在这里显示。</p>
         </div>
       )}
-      {selected?.kind === "structure" && <Modal title="结构处理任务" onClose={()=>setSelected(null)} wide><ProcessingTaskDetails id={selected.task_id}/><button onClick={()=>{onRead(selected.paper_id);setSelected(null)}}>阅读处理结果</button></Modal>}
+      {selected?.kind === "structure" && (
+        <Modal title="结构处理任务" onClose={() => setSelected(null)} wide>
+          <ProcessingTaskDetails id={selected.task_id} />
+          <button
+            onClick={() => {
+              onRead(selected.paper_id);
+              setSelected(null);
+            }}
+          >
+            阅读处理结果
+          </button>
+        </Modal>
+      )}
       {selected && selected.kind !== "structure" && (
         <TaskDetails
           task={selected}

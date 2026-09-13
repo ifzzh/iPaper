@@ -2,6 +2,59 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { X, LoaderCircle, AlertCircle } from "lucide-react";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
+import katex from "katex";
+const renderMath = (value: string, display: boolean) => {
+  try {
+    return katex.renderToString(value, {
+      output: "mathml",
+      displayMode: display,
+      throwOnError: true,
+      trust: false,
+      strict: "error",
+      maxExpand: 1000,
+      maxSize: 20,
+    });
+  } catch {
+    return value.replace(
+      /[&<>]/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!,
+    );
+  }
+};
+marked.use({
+  renderer: {
+    html(token) {
+      return token.text.replace(
+        /[&<>]/g,
+        (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!,
+      );
+    },
+  },
+  extensions: [
+    {
+      name: "ipaperBlockMath",
+      level: "block",
+      start: (source) => source.indexOf("$$"),
+      tokenizer(source) {
+        const m = /^\$\$([^]*?)\$\$(?:\n|$)/.exec(source);
+        if (m && m[0].length <= 32000)
+          return { type: "ipaperBlockMath", raw: m[0], text: m[1] };
+      },
+      renderer: (token) => renderMath(token.text, true),
+    },
+    {
+      name: "ipaperInlineMath",
+      level: "inline",
+      start: (source) => source.indexOf("$"),
+      tokenizer(source) {
+        const m = /^\$([^$\n]+)\$/.exec(source);
+        if (m && m[0].length <= 32000)
+          return { type: "ipaperInlineMath", raw: m[0], text: m[1] };
+      },
+      renderer: (token) => renderMath(token.text, false),
+    },
+  ],
+});
 import { request, errorText, csrfHeaders, ApiError } from "./api";
 export const api = <T = any,>(
   path: string,
@@ -125,12 +178,21 @@ export function Modal({
     </dialog>
   );
 }
-export function Markdown({ text }: { text: string }) {
+export function Markdown({
+  text,
+  sources,
+  onSource,
+}: {
+  text: string;
+  sources?: Record<string, { sourceId: string }>;
+  onSource?: (id: string) => void;
+}) {
   const html = DOMPurify.sanitize(
     marked.parse(text, { async: false }) as string,
     {
       FORBID_TAGS: ["style", "iframe", "form", "video", "audio", "object"],
       FORBID_ATTR: ["style"],
+      ALLOW_DATA_ATTR: false,
     },
   );
   const template = document.createElement("template");
@@ -138,11 +200,15 @@ export function Markdown({ text }: { text: string }) {
   for (const img of template.content.querySelectorAll("img")) {
     const src = img.getAttribute("src") || "";
     if (
-      !/^\/api\/paper\/[^/]+\/analysis\/image(?:\?|$)|^\/static\/images\//.test(
+      !/^(?:\/api\/paper\/[^/]+\/analysis\/image(?:\?|$)|\/api\/paper\/[^/]+\/understanding-assets\/[a-f0-9]{64}$|\/api\/understanding\/[a-f0-9-]+\/assets\/[a-f0-9]{64}$|\/static\/images\/)/.test(
         src,
       )
     )
       img.remove();
+    else {
+      img.loading = "lazy";
+      img.decoding = "async";
+    }
   }
   for (const a of template.content.querySelectorAll("a")) {
     const href = a.getAttribute("href") || "";
@@ -152,9 +218,51 @@ export function Markdown({ text }: { text: string }) {
       a.rel = "noopener noreferrer";
     }
   }
+  if (sources && onSource) {
+    const walker = document.createTreeWalker(
+      template.content,
+      NodeFilter.SHOW_TEXT,
+    );
+    const nodes: Text[] = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+    for (const node of nodes) {
+      if (node.parentElement?.closest("code,pre,a,math")) continue;
+      const value = node.textContent || "";
+      if (!/\[S[1-9][0-9]{0,5}\]/.test(value)) continue;
+      const fragment = document.createDocumentFragment();
+      let offset = 0;
+      for (const m of value.matchAll(/\[(S[1-9][0-9]{0,5})\]/g)) {
+        fragment.append(value.slice(offset, m.index));
+        if (sources[m[1]]) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "evidence-link";
+          button.dataset.sourceId = sources[m[1]].sourceId;
+          button.textContent = m[0];
+          button.setAttribute("aria-label", "查看来源 " + m[1]);
+          fragment.append(button);
+        } else fragment.append(m[0]);
+        offset = m.index + m[0].length;
+      }
+      fragment.append(value.slice(offset));
+      node.replaceWith(fragment);
+    }
+  }
   return (
     <div
       className="markdown"
+      onClick={(e) => {
+        const button = (e.target as HTMLElement).closest<HTMLButtonElement>(
+          "button[data-source-id]",
+        );
+        if (
+          button?.dataset.sourceId &&
+          Object.values(sources || {}).some(
+            (s) => s.sourceId === button.dataset.sourceId,
+          )
+        )
+          onSource?.(button.dataset.sourceId);
+      }}
       dangerouslySetInnerHTML={{ __html: template.innerHTML }}
     />
   );

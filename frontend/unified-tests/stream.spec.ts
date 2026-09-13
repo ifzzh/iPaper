@@ -39,9 +39,10 @@ test("stream failure, stop receiving, rotation and no-Range fallback retain clea
     page.locator('.pdf-panel [data-page="100"] .textLayer'),
   ).toContainText("page 100");
   expect(await page.locator(".pdf-panel canvas").count()).toBeLessThan(12);
+  await page.getByRole("checkbox").check();
   await page.getByLabel("你的问题").fill("mid-failure");
   await page.getByRole("button", { name: "发送", exact: true }).click();
-  await expect(page.locator(".chat-notice")).toContainText("未确认保存");
+  await expect(page.locator(".chat-notice")).toContainText("未保存");
   await page.getByLabel("新会话", { exact: true }).click();
   await page.getByLabel("你的问题").fill("slow");
   await page.getByRole("button", { name: "发送", exact: true }).click();

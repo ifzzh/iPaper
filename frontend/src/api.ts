@@ -7,22 +7,43 @@ export class ApiError extends Error {
   }
 }
 const processingErrors: Record<string, string> = {
+  paper_content_missing:
+    "尚无可用正文。请先明确创建解析任务，系统不会自动付费解析。",
+  content_version_changed: "解析正文版本已变化，请刷新并重新核对范围。",
+  content_coverage_confirmation_required:
+    "正文覆盖不完整或未知，请先确认本次使用的范围。",
+  content_size_limit: "正文超过当前安全处理上限，未截取开头冒充全文。",
+  interpret_settings_not_configured: "请先配置“论文问答与分析”模型及密钥。",
+  analysis_configuration_changed:
+    "解读配置已变化，原任务已停止；请按新配置创建任务。",
+  analysis_version_changed: "分析版本已变化，请刷新后重新操作。",
+  understanding_failed: "分析未完成，已有可读结果保留，请查看任务日志。",
+  local_source_required: "局部问答需要有效选区或当前结构段落。",
+  chat_request_already_submitted:
+    "此问题已提交，不会重复调用模型；请核对请求状态和历史。",
+  chat_request_in_progress: "你已有正在处理的问答，请等待结果或核对历史。",
+  model_queue_full: "模型请求已达到并发上限，请稍后再发送。",
+  analysis_export_size_limit:
+    "此分析图片包超过 32 MiB 导出上限，未生成不完整文件包。",
+  analysis_export_failed: "导出未完成，请在任务日志中核对原因。",
+  invalid_understanding_settings:
+    "请填写有效提示词（最多 12,000 字符）并选择输出语言。",
   empty_source_context:
     "当前内容没有可引用的文字，请选择正文或表格文字后提问。",
   document_worker_unavailable: "文档处理服务暂时不可用，请稍后重试。",
   document_preflight_busy:
     "文档正在预检，请稍后重试；不会创建云解析或模型请求。",
   processing_dispatch_interrupted: "本地调度中断，已保存结果保留，请明确继续。",
-  model_request_rejected: "模型服务拒绝了请求，请检查独立模型配置后继续。",
+  model_request_rejected: "模型服务拒绝了请求，请检查对应模型配置后继续。",
   model_rate_limited: "模型服务限流，已停止继续请求；请稍后明确继续。",
   pdf_selection_unverified: "未能在 PDF 页面中核实这段文字，请重新选择正文。",
   processing_scope_exceeds_budget:
-    "所选范围超过本次预算。已保存解析结果，请缩小页码范围后生成译文。",
+    "所选范围超过本次处理预算，请调整范围或预算后再提交。",
   structured_settings_not_configured: "请先在设置中配置独立的结构化翻译模型。",
   mineru_cloud_not_configured: "请先在设置中启用 MinerU 云解析并配置密钥。",
-  user_processing_busy: "你已有一个结构处理任务，请在任务中心查看或停止。",
+  user_processing_busy: "你已有一个文献处理任务，请在任务中心查看或停止。",
   processing_queue_full: "处理队列已满，请稍后再提交。",
-  owner_quota_exceeded: "结构产物已达到账号存储配额，请联系管理员调整。",
+  owner_quota_exceeded: "处理产物已达到账号存储配额，请联系管理员调整。",
   result_quota_exceeded: "此次结果超过存储上限，请缩小处理范围。",
   source_changed: "PDF 已发生变化，请重新检查处理范围。",
   source_expired: "原始文件已变化，此来源不能指向当前 PDF。",
