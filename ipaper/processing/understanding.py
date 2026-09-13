@@ -399,6 +399,9 @@ class Understanding:
         elif kind == "overview":
             instructions += (
                 "Organize into these six headings: " + "、".join(SECTIONS) + ". "
+                "Keep the complete JSON response within 3500 output tokens. "
+                "The markdown overview should be at most 900 Chinese characters or 650 English words; "
+                "use at most six evidence quotes, each at most 160 characters. Prioritize the most useful supported findings. "
             )
         if summary:
             instructions += "Synthesize the supplied evidence notes; preserve only supported claims and exact evidence quotes. "
@@ -406,6 +409,7 @@ class Understanding:
             instructions += (
                 "Explain this supplied portion in detail without repeating a generic whole-paper introduction. "
                 "Keep this response, including JSON and evidence, within 3500 output tokens. "
+                "For Chinese, aim for 900-1200 characters of substantive explanation for this portion when supported; never pad missing evidence. "
                 "Use at most six evidence quotes of at most 160 characters each; retain important supplied figure references. "
             )
         return [

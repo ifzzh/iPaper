@@ -359,7 +359,7 @@ def run_acceptance(root, sample, config, *, live=False):
                     raise ValueError("acceptance_evidence_missing")
                 (root / (kind + ".json")).write_text(encoded(value))
             source_id = next(iter(value["body"]["sources"].values()))["sourceId"]
-            question = "论文报告了哪些实验结果和局限？请区分已提供的证据与无法确认的内容，并引用来源编号。"
+            question = "论文报告了哪些实验结果和局限？请区分已提供的证据与无法确认的内容，并引用来源编号。回答控制在150字以内。"
             for mode in ("local", "paper"):
                 phase = mode
                 rid = str(uuid.uuid4())
