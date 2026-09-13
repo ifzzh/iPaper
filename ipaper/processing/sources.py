@@ -189,4 +189,10 @@ class Sources:
             if mapping:
                 labels = set(re.findall(r"\[(S[1-9][0-9]{0,2})\]", message["content"]))
                 message["sources"] = [{"label": label, "sourceId": mapping[label]} for label in sorted(labels & mapping.keys())]
+        with self.store.connection() as db:
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='understanding_chat_turns'").fetchone():
+                turns=db.execute("SELECT message_key,context_json,status FROM understanding_chat_turns WHERE owner_id=? AND session_id=? AND message_key IS NOT NULL",(self.store.owner,session_id)).fetchall()
+                scopes={row["message_key"]:json.loads(row["context_json"]) for row in turns}
+                for message in messages:
+                    if str(message.get("timestamp")) in scopes:message["scope"]=scopes[str(message["timestamp"])]
         return messages

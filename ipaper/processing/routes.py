@@ -79,7 +79,7 @@ def register_processing_routes(app, service):
     def public_job(job):
         checkpoint=json.loads(job["checkpoint_json"])
         cloud_tasks=[{"part":int(index)+1,"batchId":value["batchId"]} for index,value in checkpoint.get("parts",{}).items() if value.get("batchId")]
-        return {"id": job["id"], "paperId": job["paper_id"], "kind": job["kind"], "resultId": job["result_id"],
+        return {"id": job["id"], "paperId": job["paper_id"], "kind": job["kind"], "resultId": job["result_id"] or checkpoint.get("understandingResultId"),
                 "status": job["status"], "stage": job["stage"], "completed": job["completed"],
                 "total": job["total"], "error": job["error"], "createdAt": job["created_at"],
                 "updatedAt": job["updated_at"], "budget": json.loads(job["budget_json"]),
@@ -201,14 +201,17 @@ def register_processing_routes(app, service):
 
     @blueprint.post("/api/paper/<paper_id>/processing/estimate")
     def estimate(paper_id):
-        data = body({"kind", "preflightId", "parseResultId", "translationResultId", "sourceLanguage", "targetLanguage", "pages", "blockIds", "budget"})
+        data = body({"kind", "preflightId", "parseResultId", "translationResultId", "sourceLanguage", "targetLanguage", "pages", "blockIds", "budget", "contentVersion", "allowPartial", "previousResultId", "analysisResultId", "format"})
+        if data.get("kind") in {"overview","interpretation","analysis_export"}:
+            return jsonify(service.understanding().create(paper_id,data,preview=True))
         # Pure admission preview: no job, cloud, model or worker submission.
         return jsonify(service.pipeline().create(paper_id, data, preview=True))
 
     @blueprint.post("/api/paper/<paper_id>/processing/jobs")
     def create(paper_id):
-        data = body({"kind", "preflightId", "parseResultId", "translationResultId", "sourceLanguage", "targetLanguage", "pages", "blockIds", "budget"})
-        job, created = service.pipeline().create(paper_id, data)
+        data = body({"kind", "preflightId", "parseResultId", "translationResultId", "sourceLanguage", "targetLanguage", "pages", "blockIds", "budget", "contentVersion", "allowPartial", "previousResultId", "analysisResultId", "format"})
+        target=service.understanding() if data.get("kind") in {"overview","interpretation","analysis_export"} else service.pipeline()
+        job, created = target.create(paper_id, data)
         service.wake.set()
         return jsonify(job=public_job(job), reused=not created), 202 if created else 200
 
@@ -280,7 +283,12 @@ def register_processing_routes(app, service):
 
     @blueprint.get("/api/sources/<source_id>")
     def resolve_source(source_id):
-        return jsonify(source=service.sources().resolve(source_id))
+        try:
+            value=service.sources().resolve(source_id)
+        except ProcessingError as exc:
+            if exc.status!=404:raise
+            value=service.understanding().files.resolve(source_id)
+        return jsonify(source=value)
 
     @blueprint.route("/api/results/<result_id>/reading-position", methods=["GET", "PUT"])
     def position(result_id):
@@ -304,4 +312,6 @@ def register_processing_routes(app, service):
                        (store.owner, result["paper_id"], result_id, encoded(data), now()))
         return jsonify(position=data)
 
+    from .understanding_routes import attach_understanding_routes
+    attach_understanding_routes(blueprint,service,body)
     app.register_blueprint(blueprint)

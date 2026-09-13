@@ -89,7 +89,7 @@ def main(test_dependencies=None):
                         **({'key':config['translation']['key']} if secret else {})}
         class Credentials:
             def get(self,name): return config['mineruKey'] if name=='mineru' else config['chat']['key'] if name=='interpret' else ''
-            def configured(self,name): return name=='mineru' and bool(config['mineruKey'])
+            def configured(self,name): return bool(config['mineruKey']) if name=='mineru' else bool(config['chat']['key']) if name=='interpret' else False
         from ipaper.processing.cloud import MinerUCloud
         Cloud=(test_dependencies or {}).get('cloud',MinerUCloud)
         class OneCloud(Cloud):
@@ -178,15 +178,14 @@ def main(test_dependencies=None):
         block=client.get(f'/api/results/{result_id}/blocks/{retry_id}').json['block']
         text=block['text'];source=request('/api/paper/a-0/sources',{'resultId':result_id,'blockId':retry_id,'start':0,
                     'end':min(len(text.encode('utf-16-le'))//2,1200)})['source']
-        real_client=OpenAI(api_key=config['chat']['key'],base_url=config['chat']['baseUrl'],max_retries=0,timeout=120,
-                          http_client=DefaultHttpxClient(follow_redirects=False))
-        def create(**kwargs):
+        from ipaper.processing import understanding_chat
+        from ipaper.processing.chat_transport import stream_request
+        def bounded_chat(profile,messages,output):
             assert counters['chatRequests']==0,'duplicate_chat_forbidden'
-            assert len(json.dumps(kwargs.get('messages',[]),ensure_ascii=False).encode())+256<=5000,'chat_input_budget_exceeded'
+            assert len(json.dumps(messages,ensure_ascii=False).encode())+256<=5000,'chat_input_budget_exceeded'
             counters['chatRequests']+=1;policy.validate(config['chat']['baseUrl'],purpose='ai')
-            return real_client.chat.completions.create(**{**kwargs,'model':config['chat']['model'],
-                'max_completion_tokens':512,**generation_options(config['chat']['model'])})
-        patch.setattr(agent_chat_route,'create_openai_client',lambda *_:SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
+            yield from stream_request(profile,messages,512,deadline=120)
+        patch.setattr(understanding_chat,'stream_request',bounded_chat)
         import signal
         previous_alarm=signal.signal(signal.SIGALRM,lambda *_: (_ for _ in ()).throw(TimeoutError('chat_deadline')))
         signal.alarm(120)
@@ -214,7 +213,6 @@ def main(test_dependencies=None):
         (args.root/'result.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
         stage('completed')
         print(json.dumps({'liveAcceptance':True,'parsedBlocks':len(all_blocks),'translatedBlocks':len(chosen),'requests':counters}),flush=True)
-        real_client.close()
         if args.serve_seconds:
             server=make_server('127.0.0.3',7191,app,threaded=True)
             threading.Thread(target=server.serve_forever,daemon=True).start()

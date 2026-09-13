@@ -187,8 +187,10 @@ def _rate_limit_response(bucket: str, identity: str, limit: int, window: int):
 
 def _sensitive_rate_policy():
     path = request.path
-    if request.endpoint in {"workspace_state", "reading_position", "api_record_read_time", "api_record_reading"} and request.method in {"POST", "PUT"}:
+    if request.endpoint in {"workspace_state", "reading_position", "api_record_read_time", "api_record_reading", "processing.understanding_position", "processing.document_position", "processing.position"} and request.method in {"POST", "PUT"}:
         return "reading_state", 120, 60
+    if request.endpoint == "processing.create" and request.method == "POST":
+        return "processing", 30, 3600
     if path in {
         "/api/paper/analyze",
         "/api/paper/translate",

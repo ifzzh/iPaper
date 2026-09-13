@@ -27,7 +27,7 @@ class ProcessingJobs:
         return result
 
     def create(self, paper_id, kind, request, *, document_id=None, result_id=None, budget=None, reservation=None):
-        if kind not in {"parse", "translate", "parse_translate", "retranslate"}:
+        if kind not in {"parse", "translate", "parse_translate", "retranslate", "overview", "interpretation", "analysis_export"}:
             raise ProcessingError("invalid_processing_kind")
         budget = self.budget(budget)
         reservation = self.result_quota if reservation is None else reservation
@@ -47,7 +47,7 @@ class ProcessingJobs:
                 raise ProcessingError("processing_queue_full", 429)
             if db.execute("SELECT 1 FROM processing_jobs WHERE owner_id=? AND status IN ('queued','running','cancelling')", (self.store.owner,)).fetchone():
                 raise ProcessingError("user_processing_busy", 409)
-            occupied = db.execute("SELECT coalesce(sum(bytes),0) FROM processing_results WHERE owner_id=?", (self.store.owner,)).fetchone()[0]
+            occupied = self.store.occupied_bytes(db)
             reserved = db.execute("SELECT coalesce(sum(reserved_bytes),0) FROM processing_jobs WHERE owner_id=?", (self.store.owner,)).fetchone()[0]
             if occupied + reserved + reservation > self.owner_quota:
                 raise ProcessingError("owner_quota_exceeded", 413)
@@ -216,7 +216,7 @@ class ProcessingJobs:
                 index=unit[5:] if isinstance(unit,str) and unit.startswith("part-") else None
                 if index is None or not parts.get(index,{}).get("batchId"):
                     raise ProcessingError("cloud_submission_unknown_no_resubmit",409)
-            occupied = db.execute("SELECT coalesce(sum(bytes),0) FROM processing_results WHERE owner_id=?", (self.store.owner,)).fetchone()[0]
+            occupied = self.store.occupied_bytes(db)
             reserved = db.execute("SELECT coalesce(sum(reserved_bytes),0) FROM processing_jobs WHERE owner_id=? AND id!=?", (self.store.owner,job_id)).fetchone()[0]
             if occupied + reserved + self.result_quota > self.owner_quota:
                 raise ProcessingError("owner_quota_exceeded", 413)

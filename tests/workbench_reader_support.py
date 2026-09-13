@@ -36,9 +36,25 @@ def fake_openai():
                 self.send_error(400); return
             if not data.get('stream', False):
                 units = json.loads(prompt)
-                if not isinstance(units, list):
-                    self.send_error(400); return
-                content = {unit['id']: '合成译文：' + unit['text'] for unit in units}
+                system = data['messages'][0]['content']
+                if 'Choose evidence for a single-paper' in system:
+                    content = {'terms':['experiment','limitations','appendix'], 'unitIds':[units['index'][-1]['id']]}
+                elif 'evidence-based academic analysis' in system:
+                    if units and 'label' in units[0]:
+                        chosen = next((u for u in units if 'controlled experiment' in u['text']),units[0])
+                        evidence = [{'label':chosen['label'],'quote':chosen['text'][:90]}]
+                    else:
+                        evidence = [{'label':label,'quote':value['quote']} for u in units for label,value in u.get('evidence',{}).items()][:12]
+                    cite = '['+evidence[0]['label']+']' if evidence else ''
+                    markdown = '\n\n'.join('## '+heading+'\n\n这是一份合成验证分析，依据自制论文中的受控实验文字。'+cite for heading in ['背景与问题','核心方法','实验设置','主要发现','结论与局限','继续阅读重点'])
+                    markdown += '\n\n$$E = mc^2$$\n\n| 方法 | 得分 |\n| --- | --- |\n| Ours | 95.2 |'
+                    if '公众号风格图文长解读' in system:
+                        markdown += '\n\n## 方法与实验的详细说明\n\n' + ('这段合成说明用于核对长篇阅读与分页，依据已提供的实验文字；不代表真实论文结论。'+cite+'\n\n')*25
+                    content = {'markdown':markdown,'evidence':evidence}
+                else:
+                    if not isinstance(units,list):
+                        self.send_error(400);return
+                    content = {unit['id']: '合成译文：' + unit['text'] for unit in units}
                 payload = {'id':'synthetic','object':'chat.completion','created':0,'model':'fixture',
                     'choices':[{'index':0,'message':{'role':'assistant','content':json.dumps(content,ensure_ascii=False)},'finish_reason':'stop'}],
                     'usage':{'prompt_tokens':100,'completion_tokens':100,'total_tokens':200}}
@@ -64,6 +80,7 @@ def fake_openai():
                         time.sleep(.1)
                 if prompt == 'usage-tail':
                     self.wfile.write(b'data: {"id":"synthetic","choices":[],"usage":{"total_tokens":10}}\n\n')
+                self.wfile.write(b'data: {"id":"synthetic","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n')
                 self.wfile.write(b'data: [DONE]\n\n'); self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
                 pass
@@ -118,5 +135,9 @@ def install_reader_fixture(application, root, users, monkeypatch, origin, *, reg
                     elif i>=4: shutil.copyfile(assets/'translated.pdf',target)
                     paper.filename=target.name;paper.file_path=str(target)
                     PaperDAO.save_paper(paper.to_dict());store.upsert(paper,category_id='root',category_path=['Root'])
-                    if i==0: shutil.copyfile(assets/'translated.pdf',paper_asset_paths(root/'papers',target).chinese_dual)
+                    if i==0:
+                        asset_paths=paper_asset_paths(root/'papers',target)
+                        shutil.copyfile(assets/'translated.pdf',asset_paths.chinese_dual)
+                        (asset_paths.analysis_directory/"vlm").mkdir(parents=True,exist_ok=True)
+                        (asset_paths.analysis_directory/"vlm"/(target.stem+'.md')).write_text('Historical synthetic source for streaming tests.\n\nThe supplied sample describes a controlled experiment; full-document completeness is unknown.')
             run_as_identity(Identity(user['id'],user['username'],user['role']),seed)

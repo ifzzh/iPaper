@@ -41,7 +41,7 @@ class ProcessingStore:
             current = self._owned(db, "processing_results", result_id)["bytes"]
         if current + extra > maximum:
             raise ProcessingError("result_quota_exceeded", 413)
-        occupied = db.execute("SELECT coalesce(sum(bytes),0) FROM processing_results WHERE owner_id=?", (self.owner,)).fetchone()[0]
+        occupied = self.occupied_bytes(db)
         reserved = db.execute("SELECT coalesce(sum(reserved_bytes),0) FROM processing_jobs WHERE owner_id=? AND id!=?", (self.owner, job_id or "")).fetchone()[0]
         if occupied + reserved + extra > owner_maximum:
             raise ProcessingError("owner_quota_exceeded", 413)
@@ -65,6 +65,12 @@ class ProcessingStore:
             raise
         finally:
             db.close()
+
+    def occupied_bytes(self, db):
+        total = db.execute("SELECT coalesce(sum(bytes),0) FROM processing_results WHERE owner_id=?", (self.owner,)).fetchone()[0]
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='understanding_artifacts'").fetchone():
+            total += db.execute("SELECT coalesce(sum(bytes),0) FROM understanding_artifacts WHERE owner_id=?", (self.owner,)).fetchone()[0]
+        return total
 
     def _owned(self, db, table, row_id):
         # Table names are internal constants; never derive them from request data.

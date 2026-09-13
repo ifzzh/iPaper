@@ -77,6 +77,12 @@ def backup(database, papers_root, destination):
                     store=ProcessingStore(database,papers_root,revision['owner_id'])
                     path=safe_join(store.artifact_directory(revision['result_id']),revision['body_file'],must_exist=True,require_file=True)
                     expected[str(path.relative_to(papers_root))]=(path,revision['sha256'])
+                if db.execute("SELECT 1 FROM sqlite_master WHERE name='understanding_artifacts'").fetchone():
+                    for artifact in db.execute('SELECT * FROM understanding_artifacts'):
+                        store=ProcessingStore(database,papers_root,artifact['owner_id'])
+                        for entry in json.loads(artifact['manifest_json'])['entries']:
+                            path=safe_join(store.artifact_directory(artifact['id']),entry['path'],must_exist=True,require_file=True)
+                            expected[str(path.relative_to(papers_root))]=(path,entry['sha256'])
         for relative,(source,expected_hash) in expected.items():
             target=safe_join(destination, 'artifacts', relative)
             target.parent.mkdir(mode=0o700,parents=True,exist_ok=True)

@@ -84,3 +84,6 @@ CREATE TABLE IF NOT EXISTS processing_backup_leases (
  id TEXT PRIMARY KEY, expires_at TEXT NOT NULL
 );
 """
+
+from .understanding_schema import SCHEMA as UNDERSTANDING_SCHEMA
+SCHEMA += UNDERSTANDING_SCHEMA

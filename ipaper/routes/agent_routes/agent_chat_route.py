@@ -217,6 +217,9 @@ def register_agent_chat_routes(
         """Chat with paper context - Streaming response"""
         try:
             data = request.json or {}
+            if app.extensions.get("processing"):
+                from ipaper.processing.understanding_chat import chat_response
+                return chat_response(app.extensions["processing"], chat_history_manager, data)
             paper_id = data.get("paper_id")
             messages = data.get("messages", [])
             session_id = data.get("session_id")

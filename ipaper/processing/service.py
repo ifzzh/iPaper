@@ -32,6 +32,10 @@ class ProcessingService:
         pipeline = self.pipeline()
         return Sources(pipeline.store, pipeline.paper_file)
 
+    def understanding(self):
+        from .understanding import Understanding
+        return Understanding(self.pipeline())
+
     def initialize_ifzzh(self):
         with sqlite3.connect(self.db_path) as db:
             db.row_factory = sqlite3.Row
@@ -49,6 +53,7 @@ class ProcessingService:
         if self.thread:
             return
         with sqlite3.connect(self.db_path) as db:
+            db.execute("UPDATE understanding_chat_turns SET status='interrupted',error='server_restarted' WHERE status IN ('preparing','streaming')")
             owners = [row[0] for row in db.execute("SELECT DISTINCT owner_id FROM processing_jobs WHERE status IN ('queued','running','cancelling')")]
         for owner in owners:
             self.pipeline(owner).jobs.recover()

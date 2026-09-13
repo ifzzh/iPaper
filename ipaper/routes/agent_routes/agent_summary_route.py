@@ -30,7 +30,7 @@ from ipaper.tools.agent_tools.summary_pdf import (
     AnalysisDependencies,
     analyze_paper_task,
 )
-from ipaper.tools.api_test_utils import test_llm_api, test_mineru_api
+from ipaper.tools.api_test_utils import test_mineru_api
 
 CategoryPath = List[str]
 _default_analysis_executor = BoundedExecutor(
@@ -72,6 +72,21 @@ def register_agent_summary_routes(
     @app.route("/api/paper/analyze", methods=["POST"])
     def api_analyze_paper():
         """AI InterpretationPDFpaper - Start background task"""
+        if app.extensions.get("processing"):
+            from ipaper.processing.common import ProcessingError
+            try:
+                data=request.get_json(silent=True)
+                if not isinstance(data,dict) or set(data)-{"paper_id","ai_language"}:
+                    raise ProcessingError("invalid_request")
+                target=app.extensions["processing"].understanding()
+                state=target.files.status(data.get("paper_id"))
+                options={"kind":"interpretation","contentVersion":state["version"]}
+                if data.get("ai_language") is not None:options["language"]=data["ai_language"]
+                job,reused=target.create(data.get("paper_id"),options)
+                app.extensions["processing"].wake.set()
+                return jsonify(success=True,task_id=job["id"],reused=not reused)
+            except ProcessingError as exc:
+                return jsonify(error=exc.code),exc.status
         try:
             data = request.json or {}
             if not isinstance(data, dict):
@@ -148,20 +163,6 @@ def register_agent_summary_routes(
             if not openai_base_url or not openai_api_key:
                 return jsonify({"success": False, "error": "interpret_settings_not_configured"}), 400
             outbound_policy.validate(openai_base_url, purpose="ai")
-            llm_success, llm_error = test_llm_api(
-                llm_model, openai_base_url, openai_api_key, outbound_policy
-            )
-            if not llm_success:
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": f"LLM API test failed: {llm_error}",
-                        }
-                    ),
-                    400,
-                )
-
             # test MinerU based on mode
             if use_api:
                 # Test API token
@@ -330,6 +331,9 @@ def register_agent_summary_routes(
     @app.route("/api/paper/analyze/active", methods=["GET"])
     def api_get_active_analysis():
         """Get all ongoing interpretation tasks"""
+        if app.extensions.get("processing"):
+            tasks=app.extensions["processing"].pipeline().jobs.list()
+            return jsonify(success=True,tasks=[{"task_id":j["id"],"paper_id":j["paper_id"],"status":j["status"],"step":j["stage"],"start_time":j["created_at"]} for j in tasks if j["kind"] in {"overview","interpretation"} and j["status"] in {"queued","running","cancelling"}])
         with analysis_tasks_lock:
             active_tasks = []
             for task_id, task_info in analysis_tasks.items():
@@ -351,6 +355,15 @@ def register_agent_summary_routes(
     @app.route("/api/paper/analyze/<task_id>/logs", methods=["GET"])
     def api_get_analysis_logs(task_id):
         """Get the log of the interpretation task"""
+        if app.extensions.get("processing"):
+            from ipaper.processing.common import ProcessingError
+            try:
+                jobs=app.extensions["processing"].pipeline().jobs
+                job=jobs.get(task_id)
+                if job["kind"] not in {"overview","interpretation"}:raise ProcessingError("task_not_found",404)
+                return jsonify(success=True,status=job["status"],step=job["stage"],progress=int(job["completed"]*100/max(1,job["total"])),
+                               logs=[event["kind"] for event in jobs.events(task_id)],result={"success":job["status"]=="completed","error":job["error"]})
+            except ProcessingError as exc:return jsonify(error=exc.code),exc.status
         with analysis_tasks_lock:
             if (
                 task_id not in analysis_tasks
@@ -378,6 +391,14 @@ def register_agent_summary_routes(
     @app.route("/api/paper/analyze/<task_id>/cancel", methods=["POST"])
     def api_cancel_analysis(task_id):
         """Cancel interpretation task"""
+        if app.extensions.get("processing"):
+            from ipaper.processing.common import ProcessingError
+            try:
+                jobs=app.extensions["processing"].pipeline().jobs
+                if jobs.get(task_id)["kind"] not in {"overview","interpretation"}:raise ProcessingError("task_not_found",404)
+                jobs.cancel(task_id)
+                return jsonify(success=True)
+            except ProcessingError as exc:return jsonify(error=exc.code),exc.status
         with analysis_tasks_lock:
             if (
                 task_id not in analysis_tasks
@@ -422,6 +443,16 @@ def register_agent_summary_routes(
     @app.route("/api/paper/<paper_id>/analysis/result")
     def api_get_analysis_result(paper_id):
         """Get interpretation result file"""
+        if app.extensions.get("processing"):
+            from ipaper.processing.common import ProcessingError
+            try:
+                target=app.extensions["processing"].understanding()
+                rows,heads=target.rows(paper_id)
+                rid=heads.get("interpretation")
+                if rid:
+                    body=target.files.body(rid)
+                    return jsonify(success=True,content=body["markdown"],resultId=rid,title="论文深度解读")
+            except ProcessingError as exc:return jsonify(error=exc.code),exc.status
         # First try from paper_store Find papers in（support _ReadingListTemp Table of contents）
         entry = paper_store.get_entry(paper_id)
         if entry:

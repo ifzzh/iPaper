@@ -283,6 +283,9 @@ class ProcessingPipeline:
         return self.jobs.create(paper_id, kind, request, document_id=document["id"], result_id=result_id, budget=data.get("budget"))
 
     def run(self, job_id):
+        if self.jobs.get(job_id)["kind"] in {"overview", "interpretation", "analysis_export"}:
+            from .understanding import Understanding
+            return Understanding(self).run(job_id)
         if not self.jobs.claim(job_id):
             return
         try:
