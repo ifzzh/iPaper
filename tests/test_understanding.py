@@ -237,6 +237,20 @@ def test_long_whole_paper_qa_finds_tail_and_deduplicates(application, monkeypatc
     duplicate = c.post("/api/paper/chat", json=payload, headers=headers)
     assert duplicate.text == response.text
     assert [kind for kind, _ in calls] == ["select", "answer"]
+    other_session = c.post(
+        "/api/paper/chat/session",
+        headers=headers,
+        json={"paper_id": "a-4", "title": "independent"},
+    ).json["session"]["id"]
+    assert (
+        c.post(
+            "/api/paper/chat",
+            json={**payload, "session_id": other_session},
+            headers=headers,
+        ).status_code
+        == 409
+    )
+    assert [kind for kind, _ in calls] == ["select", "answer"]
     changed = c.post(
         "/api/paper/chat",
         json={**payload, "messages": [{"role": "user", "content": "different"}]},

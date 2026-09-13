@@ -269,14 +269,10 @@ def chat_response(service, manager, data):
     with store.connection() as db:
         store.paper_exists(db, paper_id)
     turn_id = identifier(data.get("request_id"))
+    # Bind the request ID to the complete submitted intent, including session.
+    # Reusing an ID in another conversation must never replay the first answer.
     intent = fingerprint(
-        {
-            "paper": paper_id,
-            "question": messages[-1]["content"],
-            "scope": data.get("scope"),
-            "sources": data.get("source_ids"),
-            "version": data.get("content_version"),
-        }
+        {key: value for key, value in data.items() if key != "request_id"}
     )
     with store.connection() as db:
         existing = db.execute(
