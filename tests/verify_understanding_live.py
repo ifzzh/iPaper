@@ -34,7 +34,53 @@ from tests.test_workbench import login
 from scripts.promote_processing_acceptance import insert
 
 
+def live_preflight():
+    """Construct the actual SDK transport before spending any request budget.
+
+    This performs no HTTP request and uses no real credential. In particular,
+    an unsupported inherited SOCKS proxy must fail before any receipt/task.
+    The operator can explicitly select its supported HTTP proxy; this function
+    never changes proxy variables or production outbound policy.
+    """
+    from openai import OpenAI, DefaultHttpxClient
+
+    with OpenAI(
+        api_key="offline-preflight",
+        base_url="https://example.com/v1",
+        max_retries=0,
+        http_client=DefaultHttpxClient(follow_redirects=False),
+    ):
+        pass
+
+
+def record_analysis_response(response, path, *, live):
+    diagnostic = {
+        k: response[k]
+        for k in (
+            "status",
+            "text",
+            "error",
+            "httpStatus",
+            "inputTokens",
+            "outputTokens",
+            "finishReason",
+            "errorKind",
+        )
+        if k in response
+    }
+    path.write_text(encoded(diagnostic))
+    path.chmod(0o600)
+    # Stop this acceptance package at the first unsuccessful response. The
+    # production partial-result scheduler may continue other independent chunks;
+    # a narrowly authorized acceptance must not silently spend that whole budget.
+    if live and (response.get("status") != "completed" or response.get("error")):
+        raise ProcessingError("acceptance_response_failed", 502)
+    return response
+
+
 def run_acceptance(root, sample, config, *, live=False):
+    if live:
+        live_preflight()
     import app as application_module
     from ipaper.processing import understanding as analysis, understanding_chat as chat
 
@@ -62,9 +108,9 @@ def run_acceptance(root, sample, config, *, live=False):
     receipt.update(
         live=live,
         createdAt=time.time(),
-        requests={"overview": 10, "interpretation": 5, "local": 1, "paper": 2},
-        inputBudget=415000,
-        outputBudget=48128,
+        requests={"overview": 6, "interpretation": 5, "local": 1, "paper": 2},
+        inputBudget=345000,
+        outputBudget=36864,
         timeoutSeconds=120,
         automaticRetry=False,
     )
@@ -74,7 +120,7 @@ def run_acceptance(root, sample, config, *, live=False):
     phase = None
     service = None
     limits = {
-        "overview": (10, 260000, 25600),
+        "overview": (6, 190000, 14336),
         "interpretation": (5, 110000, 20480),
         "local": (1, 10000, 512),
         "paper": (2, 35000, 1536),
@@ -238,21 +284,8 @@ def run_acceptance(root, sample, config, *, live=False):
         def guarded_analysis(profile, messages, output):
             charge(messages, output)
             response = raw_analysis(profile, messages, output)
-            diagnostic = {
-                k: response[k]
-                for k in (
-                    "status",
-                    "text",
-                    "error",
-                    "httpStatus",
-                    "inputTokens",
-                    "outputTokens",
-                )
-                if k in response
-            }
             path = root / f'response-{usage["requests"]}.json'
-            path.write_text(encoded(diagnostic))
-            path.chmod(0o600)
+            response = record_analysis_response(response, path, live=live)
             # Acceptance never retries, including a clearly rejected 429.
             if response.get("status") == "rejected":
                 response = {**response, "status": "failed"}

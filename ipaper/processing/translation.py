@@ -149,17 +149,21 @@ def request_once(profile, messages, output_limit, *, factory=None):
              timeout=120.0,max_retries=0,http_client=DefaultHttpxClient(follow_redirects=False,
              headers={"Accept-Encoding":"identity"},event_hooks={"request":[_request_clock],"response":[_bound_response]})) as client:
             response=client.chat.completions.create(model=profile["model"],messages=messages,max_tokens=output_limit,**generation_options(profile["model"]))
-        usage=response.usage
+        usage=getattr(response,"usage",None)
+        details={"inputTokens":getattr(usage,"prompt_tokens",None),
+                 "outputTokens":getattr(usage,"completion_tokens",None),
+                 "finishReason":response.choices[0].finish_reason if response.choices else "missing_choices"}
         if not response.choices or response.choices[0].finish_reason=="length":
-            return {"status":"completed","error":"model_output_incomplete"}
+            return {"status":"completed","error":"model_output_incomplete",**details}
         text=response.choices[0].message.content or ""
         if not isinstance(text,str) or len(text.encode())>256*1024:
-            return {"status":"completed","error":"model_output_too_large"}
-        return {"status":"completed","text":text,"inputTokens":getattr(usage,"prompt_tokens",None),
-                "outputTokens":getattr(usage,"completion_tokens",None)}
+            return {"status":"completed","error":"model_output_too_large",**details}
+        return {"status":"completed","text":text,**details}
     except APIStatusError as exc:
         definite=exc.status_code in {400,401,403,404,413,422,429}
         return {"status":"rejected" if definite else "unknown","httpStatus":exc.status_code}
+    except ImportError:
+        return {"status":"unknown","errorKind":"client_initialization"}
     except Exception:
         return {"status":"unknown"}
 

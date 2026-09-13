@@ -51,6 +51,9 @@ def fake_openai():
                     if '公众号风格图文长解读' in system:
                         markdown += '\n\n## 方法与实验的详细说明\n\n' + ('这段合成说明用于核对长篇阅读与分页，依据已提供的实验文字；不代表真实论文结论。'+cite+'\n\n')*25
                     markdown += ''.join('\n\n![论文图示，仅引用已提供图片]('+u['image']+')' for u in units if u.get('image'))
+                    if 'COMPACT_EVIDENCE_NOTES:' in system:
+                        evidence = evidence[:3]
+                        markdown = '- 合成验证证据：当前原文记录了研究方法、实验和可确认的局限。'+cite
                     content = {'markdown':markdown,'evidence':evidence}
                 else:
                     if not isinstance(units,list):

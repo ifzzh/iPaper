@@ -145,6 +145,166 @@ def test_failed_update_preserves_previous_analysis(understanding_app, monkeypatc
     assert c.get("/api/paper/a-4/understanding/" + good["resultId"]).status_code == 200
 
 
+def test_long_overview_extracts_compact_evidence_before_six_section_summary(
+    application, monkeypatch
+):
+    source, directory, _ = legacy_files(application)
+    (directory / (source.stem + ".md")).write_text(
+        "\n\n".join(
+            f"Section {i}: "
+            + "Original experiment evidence and reported limitations. " * 35
+            for i in range(35)
+        )
+    )
+    calls = []
+
+    def model(profile, messages, output):
+        system = messages[0]["content"]
+        units = json.loads(messages[-1]["content"])
+        compact = "COMPACT_EVIDENCE_NOTES:" in system
+        extraction = "label" in units[0]
+        calls.append((extraction, compact, output))
+        # Reproduce the actual failure: asking every chunk for six complete
+        # sections under a 1024-token cap truncates the supplier JSON.
+        if extraction and (not compact or output < 2048):
+            return {"status": "completed", "error": "model_output_incomplete"}
+        if extraction:
+            evidence = [{"label": units[0]["label"], "quote": units[0]["text"][:80]}]
+        else:
+            evidence = [
+                {"label": k, "quote": v["quote"]}
+                for note in units
+                for k, v in note["evidence"].items()
+            ][:3]
+        citation = "[" + evidence[0]["label"] + "]"
+        markdown = (
+            "- 原文实验与局限证据 " + citation
+            if compact
+            else "\n\n".join(
+                "## " + heading + "\n\n原文证据 " + citation
+                for heading in [
+                    "背景与问题",
+                    "核心方法",
+                    "实验设置",
+                    "主要发现",
+                    "结论与局限",
+                    "继续阅读重点",
+                ]
+            )
+        )
+        return {
+            "status": "completed",
+            "text": json.dumps({"markdown": markdown, "evidence": evidence}),
+        }
+
+    monkeypatch.setattr("ipaper.processing.understanding.process_request", model)
+    client = application.test_client()
+    token = login(client)
+    state = client.get("/api/paper/a-4/content").json
+    estimate = client.post(
+        "/api/paper/a-4/processing/estimate",
+        json={
+            "kind": "overview",
+            "contentVersion": state["version"],
+            "allowPartial": True,
+        },
+        headers={"X-CSRF-Token": token},
+    ).json["estimate"]
+    job = start(client, token, allowPartial=True)
+    assert job["status"] == "completed", job
+    value = client.get("/api/paper/a-4/understanding/" + job["resultId"]).json["result"]
+    assert value["body"]["coveredChunks"] == value["body"]["totalChunks"] > 1
+    assert value["body"]["markdown"].count("## ") == 6
+    assert value["body"]["sources"]
+    assert len(calls) == estimate["requests"]
+    assert sum(c[2] for c in calls) == estimate["outputTokens"]
+    assert all(
+        compact and cap == 2048 for extraction, compact, cap in calls if extraction
+    )
+    assert calls[-1] == (False, False, 4096)
+
+
+def test_live_preflight_precedes_receipt_and_failed_response_stops_acceptance(
+    tmp_path, monkeypatch
+):
+    from tests.verify_understanding_live import run_acceptance, record_analysis_response
+
+    def unavailable(**kwargs):
+        raise ImportError("missing proxy transport")
+
+    monkeypatch.setattr("openai.DefaultHttpxClient", unavailable)
+    with pytest.raises(ImportError):
+        run_acceptance(
+            tmp_path / "never-created", tmp_path / "unused-sample", {}, live=True
+        )
+    assert not (tmp_path / "never-created").exists()
+    response = {
+        "status": "completed",
+        "error": "model_output_incomplete",
+        "finishReason": "length",
+        "inputTokens": 100,
+        "outputTokens": 1024,
+        "untrustedField": "not recorded",
+    }
+    with pytest.raises(ProcessingError, match="acceptance_response_failed"):
+        record_analysis_response(response, tmp_path / "diagnostic.json", live=True)
+    stored = json.loads((tmp_path / "diagnostic.json").read_text())
+    assert stored["finishReason"] == "length" and stored["outputTokens"] == 1024
+    assert "untrustedField" not in stored
+
+
+def test_truncated_model_response_retains_usage_without_publishing_partial_text(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+    from ipaper.processing.translation import request_once
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.http = kwargs["http_client"]
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.http.close()
+
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                usage=SimpleNamespace(prompt_tokens=9000, completion_tokens=1024),
+                choices=[
+                    SimpleNamespace(
+                        finish_reason="length",
+                        message=SimpleNamespace(content="incomplete JSON"),
+                    )
+                ],
+            )
+
+    for key in (
+        "ALL_PROXY",
+        "all_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    value = request_once(
+        {"key": "fixture", "baseUrl": "https://example.com/v1", "model": "fixture"},
+        [],
+        1024,
+        factory=Client,
+    )
+    assert value == {
+        "status": "completed",
+        "error": "model_output_incomplete",
+        "finishReason": "length",
+        "inputTokens": 9000,
+        "outputTokens": 1024,
+    }
+
+
 def test_legacy_and_missing_content_are_honest_and_csrf_protected(understanding_app):
     c = understanding_app.test_client()
     token = login(c)
