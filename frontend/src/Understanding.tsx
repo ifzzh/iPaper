@@ -93,7 +93,13 @@ export function PaperWorkspace(
     mode !== "reader" && chosen ? base + "/understanding/" + chosen : null,
     {},
   );
-  const body = detail.data.result?.body;
+  // A route change can precede its response; never label the previous result
+  // as the newly selected analysis or let it overwrite that reading position.
+  const activeResult =
+    detail.data.result?.id === chosen && detail.data.result?.kind === mode
+      ? detail.data.result
+      : null;
+  const body = activeResult?.body;
   const sectionKey = mode + "|" + chosen;
   const keyRef = useRef(sectionKey);
   keyRef.current = sectionKey;
@@ -158,18 +164,18 @@ export function PaperWorkspace(
     history.replaceState(null, "", url);
   }, [mode]);
   useEffect(() => {
-    if (article.current && positionReady && !detail.loading)
+    if (article.current && activeResult && positionReady && !detail.loading)
       article.current.scrollTop =
         (positions.current[sectionKey] || 0) *
         Math.max(
           1,
           article.current.scrollHeight - article.current.clientHeight,
         );
-  }, [sectionKey, detail.loading, positionReady]);
+  }, [sectionKey, detail.loading, positionReady, activeResult?.id]);
   function savePosition() {
     if (!positionReady || !positionLoaded.current) return;
     const node = article.current;
-    if (node && mode !== "reader") {
+    if (node && mode !== "reader" && activeResult) {
       const offset =
         node.scrollTop / Math.max(1, node.scrollHeight - node.clientHeight);
       positions.current[sectionKey] = offset;
@@ -418,7 +424,7 @@ export function PaperWorkspace(
                 {chosen ? "更新" : "生成"}
                 {names[mode]}
               </button>
-              {chosen && (
+              {chosen && activeResult && (
                 <>
                   <button
                     disabled={busy}
@@ -450,6 +456,7 @@ export function PaperWorkspace(
               className="understanding-scroll"
               ref={article}
               onScroll={() => {
+                if (!activeResult) return;
                 const node = article.current;
                 if (node) {
                   const offset =
@@ -474,13 +481,13 @@ export function PaperWorkspace(
                 <summary>作者摘要 · Abstract</summary>
                 <p>{props.paper.abstract || "当前元数据没有作者摘要。"}</p>
               </details>
-              {chosen && detail.data.result ? (
+              {chosen && activeResult ? (
                 <>
                   <div className="analysis-metadata">
                     <span>
-                      {detail.data.result.status === "historical"
+                      {activeResult.status === "historical"
                         ? "历史结果 · 配置与覆盖范围未知"
-                        : `${processingNames[detail.data.result.status] || detail.data.result.status} · ${timestampText(detail.data.result.createdAt)} · ${detail.data.result.model} · ${detail.data.result.language === "zh" ? "简体中文" : detail.data.result.language === "en" ? "英语" : detail.data.result.language}`}
+                        : `${processingNames[activeResult.status] || activeResult.status} · ${timestampText(activeResult.createdAt)} · ${activeResult.model} · ${activeResult.language === "zh" ? "简体中文" : activeResult.language === "en" ? "英语" : activeResult.language}`}
                     </span>
                     <select
                       aria-label="分析版本"
@@ -504,23 +511,23 @@ export function PaperWorkspace(
                         )}
                     </select>
                   </div>
-                  {detail.data.result.stale && (
+                  {activeResult.stale && (
                     <p className="notice">
                       源 PDF 已变化。此结果仍可读，不能定位到新文件。
                     </p>
                   )}
-                  {!detail.data.result.stale &&
-                    detail.data.result.contentChanged && (
+                  {!activeResult.stale &&
+                    activeResult.contentChanged && (
                       <p className="notice">
                         当前解析正文已更新；此分析保留原版本内容与来源，可明确生成新版本。
                       </p>
                     )}
-                  {detail.data.result.configurationChanged && (
+                  {activeResult.configurationChanged && (
                     <p className="notice">
                       提示词、语言或模型配置已更新；此结果仍使用生成时的配置。
                     </p>
                   )}
-                  {detail.data.result.status === "partial" && (
+                  {activeResult.status === "partial" && (
                     <p className="notice">
                       已完成 {body?.coveredChunks ?? "部分"} /{" "}
                       {body?.totalChunks ?? "未知"}{" "}
@@ -528,7 +535,7 @@ export function PaperWorkspace(
                     </p>
                   )}
                   <p className="analysis-input-note">
-                    {detail.data.result.status === "historical"
+                    {activeResult.status === "historical"
                       ? "历史解读：生成时的上下文范围与图像输入方式未记录。"
                       : "依据解析原文、表格文字与图注生成；模型未接收图片像素。"}
                   </p>

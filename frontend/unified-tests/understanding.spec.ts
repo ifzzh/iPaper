@@ -91,6 +91,27 @@ test("single paper overview, interpretation, source return, QA and offline expor
     .getByRole("button", { name: "深度解读", exact: true })
     .click();
   await generate("深度解读");
+  // A slow overview response must not display or print the previous deep result.
+  const heads = (await (await page.request.get("/api/paper/c-4/understanding")).json()).heads;
+  let releaseOverview!: () => void;
+  let requestedOverview!: () => void;
+  const held = new Promise<void>((resolve) => { releaseOverview = resolve; });
+  const requested = new Promise<void>((resolve) => { requestedOverview = resolve; });
+  const overviewRoute = `**/api/paper/c-4/understanding/${heads.overview}`;
+  await page.route(overviewRoute, async (route) => {
+    requestedOverview();
+    await held;
+    await route.continue();
+  });
+  await page.getByRole("navigation", { name: "论文工作区" }).getByRole("button", { name: "AI 概览", exact: true }).click();
+  await requested;
+  await expect(page.locator(".understanding-scroll .markdown")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "浏览器打印", exact: true })).toHaveCount(0);
+  releaseOverview();
+  await expect(page.locator(".understanding-scroll .markdown")).toContainText("合成验证分析");
+  await page.unroute(overviewRoute);
+  await page.getByRole("navigation", { name: "论文工作区" }).getByRole("button", { name: "深度解读", exact: true }).click();
+  await expect(page.getByLabel("分析版本", { exact: true })).toHaveValue(heads.interpretation);
   await page.locator(".understanding-scroll .evidence-link").first().click();
   await expect(
     page.locator('.pdf-page[data-rendered="true"]').first(),
