@@ -136,7 +136,7 @@ class ApplicationFactoryContractTests(unittest.TestCase):
         )
         self.assertFalse(matrix["document_worker"]["publish"])
         dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
-        self.assertIn("ARG APP_VERSION=1.4.0", dockerfile)
+        self.assertIn("ARG APP_VERSION=1.5.0", dockerfile)
         self.assertIn("ARG TRANSLATION_WORKER_VERSION=1.2.0", dockerfile)
         self.assertIn("ARG DOCUMENT_WORKER_VERSION=1.2.0", dockerfile)
         compose = Path("docker-compose.yaml").read_text(encoding="utf-8")
