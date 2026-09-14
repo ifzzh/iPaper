@@ -10,7 +10,7 @@ iPaper 从 PaperPilot 持续开发而来，正在将 PaperQuay 的阅读工作�
 **产品与技术标识统一为 iPaper / ipaper。** 使用三个独立镜像仓库及 `IPAPER_` 环境变量。已有安装按迁移指南升级；持久化标识和旧环境变量读取保留兼容。
 
 
-1.3.0 候选实现独立 AI 概览、图文深度解读、共同原文来源、局部/整篇问答，以及 Markdown、图片包和浏览器打印导出。生成须明确操作，读取已有结果不调用模型。范围与限制见 [单篇理解说明](docs/development/single-paper-understanding.md)；正式发布部署仍待验收完成。
+1.3.0 提供独立 AI 概览、图文深度解读、共同原文来源、局部/整篇问答，以及 Markdown、图片包和浏览器打印导出。生成须明确操作，读取已有结果不调用模型。范围与限制见 [单篇理解说明](docs/development/single-paper-understanding.md)。
 
 ## 一个连续的研究流程
 
