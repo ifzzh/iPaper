@@ -121,14 +121,14 @@ class ApplicationFactoryContractTests(unittest.TestCase):
         version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))[
             "project"
         ]["version"]
-        self.assertEqual(version, "1.4.0")
+        self.assertEqual(version, "1.5.0")
         lock = Path("uv.lock").read_text(encoding="utf-8")
-        self.assertIn('name = "ipaper"\nversion = "1.4.0"', lock)
+        self.assertIn('name = "ipaper"\nversion = "1.5.0"', lock)
         matrix = json.loads(
             Path("docker/release-components.json").read_text(encoding="utf-8")
         )
         self.assertEqual(matrix["release"], version)
-        self.assertEqual(matrix["web"]["tag"], "1.4.0")
+        self.assertEqual(matrix["web"]["tag"], "1.5.0")
         self.assertEqual(matrix["translation_worker"]["tag"], "1.2.0")
         self.assertFalse(matrix["translation_worker"]["publish"])
         self.assertEqual(

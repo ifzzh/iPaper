@@ -12,7 +12,9 @@ iPaper 从 PaperPilot 持续开发而来，正在将 PaperQuay 的阅读工作�
 
 [1.3.0](https://github.com/ifzzh/iPaper/releases/tag/v1.3.0) 已发布并通过正式部署验收，提供独立 AI 概览、图文深度解读、共同原文来源、局部/整篇问答，以及 Markdown、图片包和浏览器打印导出。生成须明确操作，读取已有结果不调用模型。该版本仅更新 Web，两个 Worker 复用已验证的 1.2.0 摘要。范围与限制见 [单篇理解说明](docs/development/single-paper-understanding.md)。
 
-[1.4.0](https://github.com/ifzzh/iPaper/releases/tag/v1.4.0) 已发布并通过正式部署及重启验收，提供全文搜索、章节目录、版本化书签、PDF 段落缓存译文、明确触发的划词翻译及图表放大。搜索和缓存阅读不调用模型或自动 OCR。范围与限制见[日常阅读工具](docs/development/reading-tools.md)。兼容组合为 Web 1.4.0＋两个 Worker 1.2.0，部署使用 Release 中的最终摘要。
+[1.4.0](https://github.com/ifzzh/iPaper/releases/tag/v1.4.0) 已发布并通过正式部署及重启验收，提供全文搜索、章节目录、版本化书签、PDF 段落缓存译文、明确触发的划词翻译及图表放大。搜索和缓存阅读不调用模型或自动 OCR。范围与限制见[日常阅读工具](docs/development/reading-tools.md)。该版本组合为 Web 1.4.0＋两个 Worker 1.2.0。
+
+1.5.0 增加安全入库后的后台书目补全、单篇及跨页批量任务、人工修改与主动清空保护、完整作者和发表信息、当前 BibTeX 与保留不同版本的重复提示。元数据流程不调用模型、MinerU 或 OCR。用法、书目来源可用性与限制见[元数据说明](docs/development/metadata.md)。本次目标组合为 Web 1.5.0＋两个 Worker 1.2.0，实际部署证据见[发布记录](docs/releases/v1.5.0.md)。
 
 ## 一个连续的研究流程
 
@@ -27,7 +29,7 @@ iPaper 从 PaperPilot 持续开发而来，正在将 PaperQuay 的阅读工作�
 | 领域 | 已实现 | 后续建设 |
 | --- | --- | --- |
 | 论文发现 | Daily arXiv、研究主题与筛选、候选和 PDF 资产处理 | 持续完善发现流程 |
-| 文献管理 | PaperQuay 风格分类/列表/详情；上传、搜索、收藏、Reading List、Zotero RDF 导入 | 文献操作 Agent |
+| 文献管理 | PaperQuay 风格分类/列表/详情；上传、搜索、收藏、Reading List、Zotero RDF 导入、持久元数据补全、修订编辑保护与 BibTeX | 文献操作 Agent |
 | 阅读与理解 | 连续 PDF、缩略图、标签、独立阅读位置、选区提问、有效来源跳转及侧栏历史问答 | 关联笔记与批注 |
 | 翻译 | BabelDOC 纯译文/双语 PDF、独立结构化双语内容；有界任务、缓存与单块重译 | 持续完善语言与版式支持 |
 | 数据与账号 | 本地账号、用户范围隔离、服务端模型配置、持久任务 | 继续复用，保留已有论文和聊天记录 |
