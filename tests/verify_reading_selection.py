@@ -148,9 +148,15 @@ def run(root, sample, config=None):
                 "blocks"
             ]
             block = next(
-                b for b in blocks if b["type"] == "text" and len(b["text"]) > 200
+                b
+                for b in blocks
+                if b["type"] == "text"
+                and len(b["text"]) > 200
+                and "<" not in b["text"]
+                and "http" not in b["text"]
             )
-            text = block["text"][:200]
+            # Prefer a readable prose selection, rather than truncated author markup.
+            text = block["text"][:300].rsplit(" ", 1)[0]
             source = client.post(
                 "/api/paper/" + pid + "/sources",
                 headers=headers,
