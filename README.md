@@ -22,7 +22,7 @@ A version number or screen on the development branch does not establish release 
 
 [Release 1.4.0](https://github.com/ifzzh/iPaper/releases/tag/v1.4.0) is deployed and verified. It adds full-document search, outlines and versioned bookmarks, cached paragraph translations in the original PDF, explicit selection translation, and figure/table/formula enlargement. No OCR or model request is triggered by searching or reading cached results. See [reading tools and limits](docs/development/reading-tools.md). That release uses Web 1.4.0 with Workers 1.2.0.
 
-Version 1.5.0 adds background bibliographic enrichment after safe PDF admission, protected manual edits (including explicit clears), full authors and publication identifiers, current BibTeX, and non-destructive duplicate suggestions. Single and batch tasks persist across restarts. No models, MinerU or OCR are used for metadata. See [metadata usage, provider availability and limits](docs/development/metadata.md). The release targets Web 1.5.0 with unchanged Workers 1.2.0; check the [release record](docs/releases/v1.5.0.md) for deployment evidence.
+[Release 1.5.0](https://github.com/ifzzh/iPaper/releases/tag/v1.5.0) is deployed with background bibliographic enrichment after safe PDF admission, protected manual edits (including explicit clears), full authors and publication identifiers, current BibTeX, and non-destructive duplicate suggestions. Single and batch tasks persist across restarts. No models, MinerU or OCR are used for metadata. See [metadata usage, provider availability and limits](docs/development/metadata.md). The verified combination is Web 1.5.0 with unchanged Workers 1.2.0; see the [release record](docs/releases/v1.5.0.md) for acceptance evidence.
 
 ## Capabilities and direction
 

@@ -14,7 +14,7 @@ iPaper 从 PaperPilot 持续开发而来，正在将 PaperQuay 的阅读工作�
 
 [1.4.0](https://github.com/ifzzh/iPaper/releases/tag/v1.4.0) 已发布并通过正式部署及重启验收，提供全文搜索、章节目录、版本化书签、PDF 段落缓存译文、明确触发的划词翻译及图表放大。搜索和缓存阅读不调用模型或自动 OCR。范围与限制见[日常阅读工具](docs/development/reading-tools.md)。该版本组合为 Web 1.4.0＋两个 Worker 1.2.0。
 
-1.5.0 增加安全入库后的后台书目补全、单篇及跨页批量任务、人工修改与主动清空保护、完整作者和发表信息、当前 BibTeX 与保留不同版本的重复提示。元数据流程不调用模型、MinerU 或 OCR。用法、书目来源可用性与限制见[元数据说明](docs/development/metadata.md)。本次目标组合为 Web 1.5.0＋两个 Worker 1.2.0，实际部署证据见[发布记录](docs/releases/v1.5.0.md)。
+[1.5.0](https://github.com/ifzzh/iPaper/releases/tag/v1.5.0) 已发布部署，增加安全入库后的后台书目补全、单篇及跨页批量任务、人工修改与主动清空保护、完整作者和发表信息、当前 BibTeX 与保留不同版本的重复提示。元数据流程不调用模型、MinerU 或 OCR。用法、书目来源可用性与限制见[元数据说明](docs/development/metadata.md)。已验收组合为 Web 1.5.0＋两个 Worker 1.2.0，正式阅读及重启证据见[发布记录](docs/releases/v1.5.0.md)。
 
 ## 一个连续的研究流程
 
