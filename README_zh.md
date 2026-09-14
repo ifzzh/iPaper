@@ -12,6 +12,8 @@ iPaper 从 PaperPilot 持续开发而来，正在将 PaperQuay 的阅读工作�
 
 [1.3.0](https://github.com/ifzzh/iPaper/releases/tag/v1.3.0) 已发布并通过正式部署验收，提供独立 AI 概览、图文深度解读、共同原文来源、局部/整篇问答，以及 Markdown、图片包和浏览器打印导出。生成须明确操作，读取已有结果不调用模型。本次仅 Web 更新为 1.3.0，两个 Worker 复用已验证的 1.2.0 摘要。范围与限制见 [单篇理解说明](docs/development/single-paper-understanding.md)。
 
+1.4.0 候选版已实现全文搜索、章节目录、版本化书签、PDF 段落缓存译文、明确触发的划词翻译及图表放大。搜索和缓存阅读不调用模型或自动 OCR。范围与限制见[日常阅读工具](docs/development/reading-tools.md)。目标组合为 Web 1.4.0＋两个 Worker 1.2.0，部署状态以 Release 为准。
+
 ## 一个连续的研究流程
 
 **Daily arXiv 发现 → 加入文献库 → 阅读与翻译 → 论文问答 → 笔记与研究整理。**

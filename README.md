@@ -20,6 +20,8 @@ A version number or screen on the development branch does not establish release 
 
 [Release 1.3.0](https://github.com/ifzzh/iPaper/releases/tag/v1.3.0) is deployed and verified. It adds separate AI overviews and detailed interpretations, shared original-text evidence, local/whole-paper question scopes, and Markdown/image-package/browser-print exports. Generation is explicit; existing results are read without paid requests. Web is 1.3.0; unchanged Workers retain their verified 1.2.0 digests. See [single-paper understanding](docs/development/single-paper-understanding.md) for scope and limitations.
 
+The 1.4.0 candidate adds full-document search, outlines and versioned bookmarks, cached paragraph translations in the original PDF, explicit selection translation, and figure/table/formula enlargement. No OCR or model request is triggered by searching or reading cached results. See [reading tools and limits](docs/development/reading-tools.md). Its target matrix is Web 1.4.0 with Workers 1.2.0; consult the Release before deployment.
+
 ## Capabilities and direction
 
 | Area | Available now | Further development |

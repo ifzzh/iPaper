@@ -49,3 +49,9 @@
 固定 PaperQuay `1d65fdbfe0eb7ef33c57cf8b9d87b6afdb5f06bf` 的 `SummaryPanel`、summary source/agent context 流程作为分区、信息密度、来源和更新状态参考。`frontend/src/Understanding.tsx` 在现有论文标签中独立实现六部分概览、长篇解读、共用问答和来源往返；Electron summary IPC、文件系统、桌面数据库和模型密钥均未搬入。
 
 后端由 `ipaper/processing/understanding*.py` 接现有 interpret 与原文快照，概览/长解读分别保存。长解读沿用 PaperPilot 原有图文详细解释意图，未以 SummaryPanel 的速读卡替代。来源、许可及独立实现策略不变；没有更改项目许可证，也没有以不同目录名宣称 AGPL 与现有许可自动兼容。细节见 [单篇理解说明](single-paper-understanding.md)。
+
+## 1.4.0 日常阅读工具
+
+固定参照仍为 `1d65fdbfe0eb7ef33c57cf8b9d87b6afdb5f06bf`，继续独立实现，不改变许可或搬入 Electron。`PdfViewer` 的导航、页面阅读和浮层动作对应 `Reader.tsx`/`ReadingTools.tsx`；`readerSelectionQuickActions` 对应显式选择、翻译、复制和带入问答；`readerTranslationCache` 对应 `CachedTranslation.tsx` 与 owner/版本绑定的服务端缓存。上游笔记入口未接入也不显示占位项。
+
+本地增加了浏览器全页文本搜索 Worker、SQLite 修订书签、持久选区任务和 `MediaViewer.tsx`，以 HTTP 授权资产和服务端模型替代桌面路径/凭据。单击仅阅读已有可靠段落译文；划词翻译须明确提交；图表展示不引入图像模型。接口、资源限制、降级和测试入口见 [阅读工具](reading-tools.md)。
