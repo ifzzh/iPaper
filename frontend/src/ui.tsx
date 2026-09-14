@@ -1,3 +1,4 @@
+import { MediaBoundary } from "./MediaViewer";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { X, LoaderCircle, AlertCircle } from "lucide-react";
 import DOMPurify from "dompurify";
@@ -144,25 +145,28 @@ export function Modal({
   children,
   onClose,
   wide = false,
+  className = "",
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
+  className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    ref.current?.showModal();
     const old = document.activeElement;
+    ref.current?.showModal();
     return () => {
       ref.current?.close();
-      if (old instanceof HTMLElement) old.focus();
+      if (old instanceof HTMLElement && old.isConnected)
+        old.focus({ preventScroll: true });
     };
   }, []);
   return (
     <dialog
       ref={ref}
-      className={wide ? "modal wide" : "modal"}
+      className={(wide ? "modal wide" : "modal") + " " + className}
       onCancel={(e) => {
         e.preventDefault();
         onClose();
@@ -249,22 +253,24 @@ export function Markdown({
     }
   }
   return (
-    <div
-      className="markdown"
-      onClick={(e) => {
-        const button = (e.target as HTMLElement).closest<HTMLButtonElement>(
-          "button[data-source-id]",
-        );
-        if (
-          button?.dataset.sourceId &&
-          Object.values(sources || {}).some(
-            (s) => s.sourceId === button.dataset.sourceId,
+    <MediaBoundary>
+      <div
+        className="markdown"
+        onClick={(e) => {
+          const button = (e.target as HTMLElement).closest<HTMLButtonElement>(
+            "button[data-source-id]",
+          );
+          if (
+            button?.dataset.sourceId &&
+            Object.values(sources || {}).some(
+              (s) => s.sourceId === button.dataset.sourceId,
+            )
           )
-        )
-          onSource?.(button.dataset.sourceId);
-      }}
-      dangerouslySetInnerHTML={{ __html: template.innerHTML }}
-    />
+            onSource?.(button.dataset.sourceId);
+        }}
+        dangerouslySetInnerHTML={{ __html: template.innerHTML }}
+      />
+    </MediaBoundary>
   );
 }
 export function Field({

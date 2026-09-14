@@ -71,6 +71,7 @@ export const processingNames: Record<string, string> = {
   cancelling: "正在停止后续处理",
 };
 const stages: Record<string, string> = {
+  selection_translate: "翻译临时选区",
   queued: "等待调度",
   cloud_upload: "上传解析分段",
   normalizing: "校验并整理结构",
@@ -553,6 +554,7 @@ export function ProcessingTaskDetails({
                 停止后续处理
               </button>
             ) : (
+              j.kind !== "selection_translate" &&
               ["failed", "partial", "interrupted", "cancelled"].includes(
                 j.status,
               ) && (
@@ -571,6 +573,10 @@ export function ProcessingTaskDetails({
               刷新
             </button>
           </div>
+          {j.kind === "selection_translate" &&
+            ["failed", "interrupted", "cancelled"].includes(j.status) && (
+              <p>临时划词任务不自动重发；请回到原选区确认重试。</p>
+            )}
           <details>
             <summary>任务日志</summary>
             {(j.cloudTasks || []).map((t: any) => (

@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 export type Excerpt = {
   text: string;
-  page: number;
+  page?: number;
   document: string;
   title: string;
   sourceId?: string;
@@ -269,7 +269,7 @@ export function Chat({
       role: "user",
       content:
         (excerpt && scope === "local"
-          ? `引用《${excerpt.title}》${excerpt.locationLabel || `${excerpt.document === "translated" ? "译文" : "原文"}第 ${excerpt.page} 页`}：\n> ${excerpt.text.replace(/\n/g, "\n> ")}\n\n`
+          ? `引用《${excerpt.title}》${excerpt.locationLabel || `${excerpt.document === "translated" ? "译文" : "原文"}${excerpt.page ? `第 ${excerpt.page} 页` : "选区（页码未确认）"}`}：\n> ${excerpt.text.replace(/\n/g, "\n> ")}\n\n`
           : "") + draft.trim(),
     };
     onClearExcerpt?.();
@@ -512,7 +512,7 @@ export function Chat({
               <span>
                 引用 ·{" "}
                 {excerpt.locationLabel ||
-                  `${excerpt.document === "translated" ? "译文" : "原文"}第 ${excerpt.page} 页`}
+                  `${excerpt.document === "translated" ? "译文" : "原文"}${excerpt.page ? `第 ${excerpt.page} 页` : "选区（页码未确认）"}`}
               </span>
               <button
                 type="button"

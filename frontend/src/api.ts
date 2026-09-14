@@ -7,6 +7,15 @@ export class ApiError extends Error {
   }
 }
 const processingErrors: Record<string, string> = {
+  invalid_bookmark_name:"书签名称需要 1–120 个字符。",
+  bookmark_changed:"书签已在另一处更新，请重新打开书签列表后再操作。",
+  bookmark_limit:"书签已达上限：每篇 200 条、每账号 5,000 条。",
+  reading_search_expired:"内容或译文修订已变化，请重新搜索，避免混合不同版本。",
+  selection_length_limit:"一次最多翻译 2,000 个字符；请缩短选区，不会自动截断。",
+  selection_input_limit:"选区超过本次输入预算，请缩短后明确提交。",
+  selection_cache_quota:"划词缓存已达账号上限，请等待到期清理或联系管理员。",
+  selection_source_mismatch:"选区与来源版本不匹配，请重新选择。",
+  selection_explicit_retry_required:"请回到原选区翻译窗口明确重试；不会自动追加模型请求。",
   paper_content_missing:
     "尚无可用正文。请先明确创建解析任务，系统不会自动付费解析。",
   content_version_changed: "解析正文版本已变化，请刷新并重新核对范围。",

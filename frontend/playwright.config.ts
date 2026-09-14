@@ -1,7 +1,7 @@
 import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./unified-tests",
-  testIgnore: ["structured.spec.ts", "understanding.spec.ts"],
+  testIgnore: ["structured.spec.ts", "understanding.spec.ts", "reading-tools.spec.ts"],
   workers: 1,
   timeout: 30000,
   use: { baseURL: "http://127.0.0.2:7191", browserName: "chromium" },

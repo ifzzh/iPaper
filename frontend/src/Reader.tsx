@@ -27,10 +27,23 @@ import {
   X,
   Quote,
   LoaderCircle,
+  Search,
 } from "lucide-react";
 import { Chat, type Excerpt } from "./Chat";
 import { api, Modal, Field, Status } from "./ui";
 import { type Paper, errorText } from "./api";
+import {
+  PdfNavigation,
+  useDocumentIdentity,
+  useReadingShortcut,
+  SelectionPopup,
+  type SelectionInput,
+  type Bookmark,
+} from "./ReadingTools";
+import { highlightMatch } from "./pdfSearch";
+import type { Match } from "./readingSearch";
+import type { ProcessingResult } from "./Processing";
+import { CachedTranslation } from "./CachedTranslation";
 GlobalWorkerOptions.workerSrc = workerUrl;
 const assetRoot = `${import.meta.env.BASE_URL}pdfjs/`;
 type Position = {
@@ -53,6 +66,9 @@ function PdfPage({
   estimatedSize,
   thumbnail = false,
   sourceRegions = [],
+  searchMatch = null,
+  onMatchMissing,
+  onRegion,
 }: {
   doc: PDFDocumentProxy;
   number: number;
@@ -64,11 +80,31 @@ function PdfPage({
   estimatedSize: { width: number; height: number };
   thumbnail?: boolean;
   sourceRegions?: number[][];
+  searchMatch?: Match | null;
+  onMatchMissing?: () => void;
+  onRegion?: (page: number, x: number, y: number) => void;
 }) {
   const host = useRef<HTMLDivElement>(null),
     [visible, setVisible] = useState(false),
     [size, setSize] = useState(estimatedSize),
     [error, setError] = useState("");
+  const renderedText = useRef<{
+    surface: HTMLElement;
+    divs: HTMLElement[];
+  } | null>(null);
+  const currentMatch = useRef(searchMatch),
+    regionHandler = useRef(onRegion);
+  currentMatch.current = searchMatch;
+  regionHandler.current = onRegion;
+  const mark = () => {
+    const value = renderedText.current;
+    if (
+      value &&
+      !highlightMatch(value.surface, value.divs, currentMatch.current)
+    )
+      onMatchMissing?.();
+  };
+  useEffect(mark, [searchMatch]);
   const height = (rotation % 180 ? size.width : size.height) * scale;
   const width = (rotation % 180 ? size.height : size.width) * scale;
   useLayoutEffect(() => {
@@ -92,6 +128,7 @@ function PdfPage({
       text: TextLayer | undefined,
       canvas: HTMLCanvasElement | undefined;
     let pdfPage: PDFPageProxy | undefined;
+    let clickTimer: ReturnType<typeof setTimeout> | undefined;
     const el = host.current!;
     setError("");
     void (async () => {
@@ -141,9 +178,39 @@ function PdfPage({
         });
         await text.render();
         if (!active) return;
+        renderedText.current = { surface, divs: text.textDivs };
+        mark();
+        let down: { x: number; y: number; at: number } | null = null;
+        surface.addEventListener("pointerdown", (e) => {
+          down = { x: e.clientX, y: e.clientY, at: performance.now() };
+        });
+        surface.addEventListener("click", (e) => {
+          clearTimeout(clickTimer);
+          if (
+            e.detail !== 1 ||
+            !down ||
+            Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6 ||
+            performance.now() - down.at > 450 ||
+            (e.target as HTMLElement)?.closest("a,button,input")
+          )
+            return;
+          const box = surface.getBoundingClientRect(),
+            [x, y] = vp.convertToPdfPoint(
+              e.clientX - box.left,
+              e.clientY - box.top,
+            );
+          clickTimer = setTimeout(() => {
+            if (active && window.getSelection()?.isCollapsed)
+              regionHandler.current?.(number, x, y);
+          }, 260);
+        });
+        surface.addEventListener("dblclick", () => clearTimeout(clickTimer));
       }
       for (const rectangle of sourceRegions) {
-        const coords = [...vp.convertToViewportPoint(rectangle[0], rectangle[1]), ...vp.convertToViewportPoint(rectangle[2], rectangle[3])];
+        const coords = [
+          ...vp.convertToViewportPoint(rectangle[0], rectangle[1]),
+          ...vp.convertToViewportPoint(rectangle[2], rectangle[3]),
+        ];
         const highlight = document.createElement("div");
         highlight.className = "pdf-source-highlight";
         highlight.setAttribute("aria-label", "引用来源区域");
@@ -157,13 +224,18 @@ function PdfPage({
       onReady?.(number);
     })().catch((e) => {
       if (active && e?.name !== "RenderingCancelledException") {
-        console.error("PDF page render failed", {name:e?.name,page:number});
+        console.error("PDF page render failed", {
+          name: e?.name,
+          page: number,
+        });
         setError("此页渲染失败，请重新打开文档。");
         el.replaceChildren();
       }
     });
     return () => {
       active = false;
+      clearTimeout(clickTimer);
+      renderedText.current = null;
       render?.cancel();
       text?.cancel();
       el.replaceChildren();
@@ -200,6 +272,12 @@ export function PdfReader({
   fileDocumentId,
   onSource,
   embedded = false,
+  structureResult,
+  translationResults = [],
+  cachedTranslationId,
+  onCachedTranslation,
+  onBookmarkNavigate,
+  bookmarkTarget,
 }: {
   preferences: any;
   onPreferences: (v: Record<string, unknown>) => void;
@@ -211,8 +289,19 @@ export function PdfReader({
   drafts?: Map<string, string>;
   toolbarContent?: ReactNode;
   embedded?: boolean;
+  structureResult?: ProcessingResult;
+  translationResults?: ProcessingResult[];
+  cachedTranslationId?: string;
+  onCachedTranslation?: (id: string) => void;
+  onBookmarkNavigate?: (bookmark: Bookmark) => void;
+  bookmarkTarget?: Bookmark;
   fileDocumentId?: string;
-  sourceTarget?: { id: string; documentId: string; page?: number; regions: {page:number; rect:number[]}[] };
+  sourceTarget?: {
+    id: string;
+    documentId: string;
+    page?: number;
+    regions: { page: number; rect: number[] }[];
+  };
   onSource?: (id: string) => void;
 }) {
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null),
@@ -221,7 +310,8 @@ export function PdfReader({
     [rotation, setRotation] = useState(0),
     [thumbs, setThumbs] = useState(
       () =>
-        !embedded && !matchMedia("(max-width:640px)").matches &&
+        !embedded &&
+        !matchMedia("(max-width:640px)").matches &&
         preferences.thumbnailOpen !== false,
     ),
     [chat, setChat] = useState(!embedded),
@@ -237,7 +327,39 @@ export function PdfReader({
     [selection, setSelection] = useState<Excerpt | null>(null),
     [sessionId, setSessionId] = useState("");
   const [pageInput, setPageInput] = useState("1");
+  const [navTab, setNavTab] = useState(
+      preferences.navigationPanel || "outline",
+    ),
+    [match, setMatch] = useState<{ page: number; match: Match | null }>({
+      page: 0,
+      match: null,
+    }),
+    [translateSelection, setTranslateSelection] =
+      useState<SelectionInput | null>(null),
+    [regionClick, setRegionClick] = useState<{
+      page: number;
+      x: number;
+      y: number;
+    } | null>(null);
+  const identity = useDocumentIdentity(
+    paper.id,
+    translated ? "translated" : "original",
+    fileDocumentId || sourceTarget?.documentId,
+    !!doc,
+  );
+
   useEffect(() => setPageInput(String(page)), [page]);
+  useEffect(() => {
+    const narrow = matchMedia("(max-width:900px)");
+    const changed = () => {
+      if (narrow.matches) setThumbs(false);
+    };
+    narrow.addEventListener("change", changed);
+    return () => narrow.removeEventListener("change", changed);
+  }, []);
+  useEffect(() => {
+    if (thumbs) setRegionClick(null);
+  }, [thumbs]);
   const host = useRef<HTMLDivElement>(null),
     thumbRoot = useRef<HTMLDivElement>(null),
     workspace = useRef<HTMLDivElement>(null),
@@ -249,6 +371,20 @@ export function PdfReader({
     positionLoaded = useRef(false),
     destroying = useRef<Promise<void>>(Promise.resolve()),
     alive = useRef(true);
+  useReadingShortcut(
+    workspace,
+    () => {
+      setThumbs(true);
+      setNavTab("search");
+    },
+    !embedded,
+  );
+  useEffect(() => {
+    window.getSelection()?.removeAllRanges();
+    setTranslateSelection(null);
+    setRegionClick(null);
+    setMatch({ page: 0, match: null });
+  }, [paper.id, translated, fileDocumentId]);
   useEffect(() => {
     if (preferences.chatWidth)
       workspace.current?.style.setProperty(
@@ -257,8 +393,13 @@ export function PdfReader({
       );
   }, [preferences.chatWidth]);
   const variant = translated ? "translated" : "original",
-    url = (fileDocumentId || sourceTarget?.documentId) ? `/api/documents/${encodeURIComponent(fileDocumentId || sourceTarget!.documentId)}/file` : `/api/paper/${encodeURIComponent(paper.id)}/${translated ? "chinese/" : ""}file`,
-    positionUrl = fileDocumentId ? `/api/documents/${encodeURIComponent(fileDocumentId)}/reading-position` : `/api/paper/${encodeURIComponent(paper.id)}/reading-position`;
+    url =
+      fileDocumentId || sourceTarget?.documentId
+        ? `/api/documents/${encodeURIComponent(fileDocumentId || sourceTarget!.documentId)}/file`
+        : `/api/paper/${encodeURIComponent(paper.id)}/${translated ? "chinese/" : ""}file`,
+    positionUrl = fileDocumentId
+      ? `/api/documents/${encodeURIComponent(fileDocumentId)}/reading-position`
+      : `/api/paper/${encodeURIComponent(paper.id)}/reading-position`;
   async function save(keepalive = false) {
     const p = point.current;
     if (
@@ -403,6 +544,7 @@ export function PdfReader({
   }, [url, retry]);
   useEffect(() => {
     if (!doc) return;
+    let active = true;
     const size = () => {
       const el = host.current;
       if (!el) return;
@@ -423,8 +565,20 @@ export function PdfReader({
     const obs = new ResizeObserver(size);
     if (host.current) obs.observe(host.current);
     size();
-    return () => obs.disconnect();
-  }, [doc, zoom, rotation, chat, thumbs]);
+    void doc
+      .getPage(page)
+      .then((p) => {
+        if (!active) return;
+        const vp = p.getViewport({ scale: 1 });
+        baseSize.current = { width: vp.width, height: vp.height };
+        size();
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+      obs.disconnect();
+    };
+  }, [doc, page, zoom, rotation, chat, thumbs]);
   const layoutFrame = useRef(0),
     settledFrame = useRef(0);
   function positionDOM(n: number, offset: number) {
@@ -457,20 +611,42 @@ export function PdfReader({
   useEffect(() => {
     let active = true;
     if (doc && sourceTarget?.page) {
-      void doc.getPage(sourceTarget.page).then(pdfPage => {
-        if (!active) return;
-        const region = sourceTarget.regions.find(r=>r.page===sourceTarget.page);
-        let offset=0;
-        if (region) {
-          const vp=pdfPage.getViewport({scale:1,rotation:(pdfPage.rotate+rotation)%360});
-          const a=vp.convertToViewportPoint(region.rect[0],region.rect[1]),b=vp.convertToViewportPoint(region.rect[2],region.rect[3]);
-          offset=Math.max(0,Math.min(.95,Math.min(a[1],b[1])/vp.height-.08));
-        }
-        jump(sourceTarget.page!,offset);
-      }).catch(()=>{});
+      void doc
+        .getPage(sourceTarget.page)
+        .then((pdfPage) => {
+          if (!active) return;
+          const region = sourceTarget.regions.find(
+            (r) => r.page === sourceTarget.page,
+          );
+          let offset = 0;
+          if (region) {
+            const vp = pdfPage.getViewport({
+              scale: 1,
+              rotation: (pdfPage.rotate + rotation) % 360,
+            });
+            const a = vp.convertToViewportPoint(region.rect[0], region.rect[1]),
+              b = vp.convertToViewportPoint(region.rect[2], region.rect[3]);
+            offset = Math.max(
+              0,
+              Math.min(0.95, Math.min(a[1], b[1]) / vp.height - 0.08),
+            );
+          }
+          jump(sourceTarget.page!, offset);
+        })
+        .catch(() => {});
     }
-    return ()=>{active=false};
+    return () => {
+      active = false;
+    };
   }, [doc, sourceTarget?.id]);
+  useEffect(() => {
+    if (
+      bookmarkTarget &&
+      identity.identity?.id === bookmarkTarget.documentId &&
+      doc
+    )
+      jump(bookmarkTarget.location.page, bookmarkTarget.location.offset);
+  }, [bookmarkTarget?.id, doc, identity.identity?.id]);
   function jump(n: number, offset = 0) {
     if (!doc || !point.current || n < 1 || n > doc.numPages) return;
     const next = { ...point.current, page: n, offset };
@@ -513,7 +689,8 @@ export function PdfReader({
   useEffect(() => {
     const t = setInterval(() => {
       if (
-        doc && !embedded &&
+        doc &&
+        !embedded &&
         document.visibilityState === "visible" &&
         document.hasFocus() &&
         !(mobileChat && matchMedia("(max-width:640px)").matches)
@@ -550,13 +727,57 @@ export function PdfReader({
       const n = Number(
         element?.closest("[data-page]")?.getAttribute("data-page") || page,
       );
-      const text = s.toString().trim().slice(0, 12000);
+      const focus =
+        s.focusNode instanceof Element
+          ? s.focusNode
+          : s.focusNode?.parentElement;
+      const endPage = Number(
+        focus?.closest("[data-page]")?.getAttribute("data-page"),
+      );
+      const text = s.toString().trim();
       if (text)
-        setSelection({ text, page: n, document: variant, title: paper.title });
+        setSelection({
+          text,
+          page: n === endPage ? n : undefined,
+          document: variant,
+          title: paper.title,
+        });
     };
     document.addEventListener("selectionchange", changed);
     return () => document.removeEventListener("selectionchange", changed);
   }, [paper.id, variant, page]);
+  const latestSelection = useRef(selection);
+  latestSelection.current = selection;
+  async function openSelectionTranslation() {
+    const snapshot = selection,
+      document = identity.identity;
+    if (!snapshot || !document) return;
+    let sourceId: string | undefined;
+    if (snapshot.page) {
+      try {
+        const response = await api(
+          `/api/paper/${encodeURIComponent(paper.id)}/pdf-sources`,
+          "POST",
+          {
+            document: variant,
+            documentId: document.id,
+            page: snapshot.page,
+            text: snapshot.text,
+          },
+        );
+        sourceId = response.source.id;
+      } catch {
+        /* The selection remains explicitly unverified; translation does not require parsing. */
+      }
+    }
+    if (alive.current && latestSelection.current === snapshot)
+      setTranslateSelection({
+        ...snapshot,
+        document: variant,
+        documentId: document.id,
+        sourceId,
+      });
+  }
   function onScroll() {
     if (!host.current || !doc || restore.current) return;
     const top = host.current.getBoundingClientRect().top + 40;
@@ -587,9 +808,44 @@ export function PdfReader({
       };
     }
   }
+  const revealPending = useRef(false);
+  function revealSearch() {
+    if (!revealPending.current || !match.match || !host.current) return;
+    const surface = host.current.querySelector<HTMLElement>(
+        `.page-host[data-page="${match.page}"] .pdf-page`,
+      ),
+      marker = surface?.querySelector<HTMLElement>(".pdf-search-highlight");
+    if (!surface || !marker) return;
+    revealPending.current = false;
+    jump(
+      match.page,
+      Math.max(
+        0,
+        Math.min(
+          0.98,
+          (marker.offsetTop - host.current.clientHeight * 0.25) /
+            surface.clientHeight,
+        ),
+      ),
+    );
+    host.current.scrollLeft = Math.max(
+      0,
+      marker.getBoundingClientRect().left -
+        host.current.getBoundingClientRect().left +
+        host.current.scrollLeft -
+        host.current.clientWidth * 0.4,
+    );
+  }
+  useEffect(() => {
+    revealPending.current = !!match.match;
+    const timer = setTimeout(revealSearch, 80);
+    return () => clearTimeout(timer);
+  }, [match, scale, rotation]);
   function pageReady(_n: number) {
     setStatus("");
+    if (_n === match.page) requestAnimationFrame(revealSearch);
   }
+
   const resized = useRef<(() => void) | null>(null);
   useEffect(() => () => resized.current?.(), []);
   function resize(e: React.PointerEvent) {
@@ -621,7 +877,8 @@ export function PdfReader({
   return (
     <main
       className={
-        "reader-workspace " + (embedded ? "embedded-reader " : "") +
+        "reader-workspace " +
+        (embedded ? "embedded-reader " : "") +
         (chat ? "with-chat " : "") +
         (thumbs ? "with-thumbnails " : "") +
         (mobileChat ? "mobile-chat" : "")
@@ -631,7 +888,7 @@ export function PdfReader({
       <div className="reader-toolbar">
         <button
           className="icon-button"
-          aria-label="显示缩略图"
+          aria-label="显示阅读导航"
           aria-pressed={thumbs}
           onClick={() => {
             setThumbs((v) => !v);
@@ -640,25 +897,37 @@ export function PdfReader({
         >
           <PanelLeft size={18} />
         </button>
+        <button
+          className="icon-button"
+          aria-label="搜索全文"
+          onClick={() => {
+            setThumbs(true);
+            setNavTab("search");
+          }}
+        >
+          <Search size={17} />
+        </button>
         <span className="reader-document-title" title={paper.title}>
           {paper.title}
         </span>
-        {toolbarContent || <label>
-          <span className="sr-only">文档版本</span>
-          <select
-            aria-label="文档版本"
-            value={variant}
-            onChange={(e) => {
-              void save();
-              onVersion(e.target.value === "translated");
-            }}
-          >
-            <option value="original">原文</option>
-            {(paper.translated || translated) && (
-              <option value="translated">译文</option>
-            )}
-          </select>
-        </label>}
+        {toolbarContent || (
+          <label>
+            <span className="sr-only">文档版本</span>
+            <select
+              aria-label="文档版本"
+              value={variant}
+              onChange={(e) => {
+                void save();
+                onVersion(e.target.value === "translated");
+              }}
+            >
+              <option value="original">原文</option>
+              {(paper.translated || translated) && (
+                <option value="translated">译文</option>
+              )}
+            </select>
+          </label>
+        )}
         <div className="toolbar-separator" />
         <button
           className="icon-button"
@@ -736,33 +1005,94 @@ export function PdfReader({
           <span>{mobileChat ? "返回阅读" : "论文问答"}</span>
         </button>
       </div>
+      {translateSelection && (
+        <SelectionPopup
+          key={translateSelection.text + translateSelection.documentId}
+          paperId={paper.id}
+          selection={translateSelection}
+          onClose={() => setTranslateSelection(null)}
+          onAsk={(value) => {
+            setExcerpt(value);
+            setChat(true);
+            setMobileChat(matchMedia("(max-width:640px)").matches);
+            setTranslateSelection(null);
+          }}
+        />
+      )}
+      {regionClick && identity.identity && !translated && (
+        <CachedTranslation
+          key={`${regionClick.page}:${regionClick.x}:${regionClick.y}`}
+          paperId={paper.id}
+          document={identity.identity}
+          point={regionClick}
+          results={translationResults}
+          selectedId={cachedTranslationId}
+          onSelected={(id) => onCachedTranslation?.(id)}
+          onClose={() => setRegionClick(null)}
+          onAsk={(value) => {
+            setExcerpt({ ...value, title: paper.title, document: "original" });
+            setChat(true);
+            setRegionClick(null);
+          }}
+        />
+      )}
       <div className="reader-body">
         {thumbs && (
-          <aside className="thumbnail-sidebar" ref={thumbRoot}>
-            <div className="section-label">页面缩略图</div>
-            {doc &&
-              Array.from({ length: doc.numPages }, (_, i) => (
-                <button
-                  className={
-                    page === i + 1 ? "thumbnail selected" : "thumbnail"
-                  }
-                  key={i}
-                  onClick={() => jump(i + 1)}
-                  aria-label={`跳到第 ${i + 1} 页`}
-                >
-                  <PdfPage
-                    doc={doc}
-                    number={i + 1}
-                    scale={0.16}
-                    rotation={0}
-                    root={thumbRoot}
-                    estimatedSize={baseSize.current}
-                    thumbnail
-                  />
-                  <span>{i + 1}</span>
-                </button>
-              ))}
-          </aside>
+          <PdfNavigation
+            doc={doc}
+            paperId={paper.id}
+            identity={identity.identity}
+            identityError={identity.error}
+            onIdentityRetry={identity.retry}
+            current={() => ({
+              page: point.current?.page || page,
+              offset: point.current?.offset || 0,
+            })}
+            onJump={jump}
+            onBookmark={(b) => {
+              if (b.resultId || b.documentId !== identity.identity?.id)
+                onBookmarkNavigate?.(b);
+              else {
+                if (b.notice) setNotice(b.notice);
+                jump(b.location.page, b.location.offset);
+              }
+            }}
+            structureResult={structureResult}
+            tab={navTab}
+            setTab={setNavTab}
+            onClose={() => {
+              setThumbs(false);
+              setMatch({ page: 0, match: null });
+            }}
+            onMatch={(page, match) => setMatch({ page, match })}
+            thumbnail={
+              <div className="thumbnail-sidebar" ref={thumbRoot}>
+                {" "}
+                {doc &&
+                  Array.from({ length: doc.numPages }, (_, i) => (
+                    <button
+                      className={
+                        page === i + 1 ? "thumbnail selected" : "thumbnail"
+                      }
+                      key={i}
+                      onClick={() => jump(i + 1)}
+                      aria-label={`跳到第 ${i + 1} 页`}
+                    >
+                      <PdfPage
+                        doc={doc}
+                        number={i + 1}
+                        scale={0.16}
+                        rotation={0}
+                        root={thumbRoot}
+                        estimatedSize={baseSize.current}
+                        thumbnail
+                      />
+                      <span>{i + 1}</span>
+                    </button>
+                  ))}
+              </div>
+            }
+          />
         )}
         <section className="pdf-panel" aria-label="PDF 阅读">
           <div className="pdf-status" role="status">
@@ -803,7 +1133,24 @@ export function PdfReader({
                   rotation={rotation}
                   root={host}
                   estimatedSize={baseSize.current}
-                  sourceRegions={sourceTarget?.regions.filter(r => r.page === i + 1).map(r => r.rect)}
+                  searchMatch={match.page === i + 1 ? match.match : null}
+                  onMatchMissing={() =>
+                    setNotice(
+                      "匹配已定位到页面，但此处文字层无法精确映射，未绘制猜测高亮。",
+                    )
+                  }
+                  onRegion={
+                    !translated && identity.identity
+                      ? (page, x, y) => {
+                          if (matchMedia("(max-width:900px)").matches)
+                            setThumbs(false);
+                          setRegionClick({ page, x, y });
+                        }
+                      : undefined
+                  }
+                  sourceRegions={sourceTarget?.regions
+                    .filter((r) => r.page === i + 1)
+                    .map((r) => r.rect)}
                   onLayout={reflowPosition}
                   onReady={pageReady}
                 />
@@ -812,14 +1159,43 @@ export function PdfReader({
           {selection && (
             <div className="selection-actions">
               <Quote size={16} />
-              <span>已选择 {selection.text.length} 字</span>
+              <span>已选择 {Array.from(selection.text).length} 字</span>
+              <button
+                disabled={!identity.identity}
+                onClick={() => void openSelectionTranslation()}
+              >
+                翻译
+              </button>
               <button
                 className="primary"
+                disabled={!selection.page}
+                title={
+                  !selection.page
+                    ? "跨页选区请分页面提问，以核实来源"
+                    : undefined
+                }
                 onClick={async () => {
+                  const snapshot = selection;
                   try {
-                    const verified = await api(`/api/paper/${encodeURIComponent(paper.id)}/pdf-sources`, "POST", {document:variant,documentId:fileDocumentId,page:selection.page,text:selection.text});
-                    setExcerpt({...selection,sourceId:verified.source.id});
-                  } catch (e) { setNotice("选区暂时无法核实到此 PDF 页面，请重新选择或稍后重试。"); return; }
+                    const verified = await api(
+                      `/api/paper/${encodeURIComponent(paper.id)}/pdf-sources`,
+                      "POST",
+                      {
+                        document: variant,
+                        documentId: fileDocumentId,
+                        page: selection.page,
+                        text: selection.text,
+                      },
+                    );
+                    if (!alive.current || latestSelection.current !== snapshot)
+                      return;
+                    setExcerpt({ ...snapshot, sourceId: verified.source.id });
+                  } catch (e) {
+                    setNotice(
+                      "选区暂时无法核实到此 PDF 页面，请重新选择或稍后重试。",
+                    );
+                    return;
+                  }
                   setChat(true);
                   setMobileChat(matchMedia("(max-width:640px)").matches);
                   setSelection(null);

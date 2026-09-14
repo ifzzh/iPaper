@@ -145,7 +145,13 @@ export function PaperWorkspace(
             setResultIds((ids) => ({ ...ids, [kind]: p.resultId }));
           positions.current[kind + "|" + (p.resultId || "")] = p.offset || 0;
         }
-        if (!query.has("panel") && v.kind && props.initialView !== "analysis")
+        if (
+          !query.has("panel") &&
+          !query.has("view") &&
+          !query.has("document") &&
+          v.kind &&
+          props.initialView !== "analysis"
+        )
           setMode(v.kind);
       })
       .catch(() => {
@@ -516,12 +522,11 @@ export function PaperWorkspace(
                       源 PDF 已变化。此结果仍可读，不能定位到新文件。
                     </p>
                   )}
-                  {!activeResult.stale &&
-                    activeResult.contentChanged && (
-                      <p className="notice">
-                        当前解析正文已更新；此分析保留原版本内容与来源，可明确生成新版本。
-                      </p>
-                    )}
+                  {!activeResult.stale && activeResult.contentChanged && (
+                    <p className="notice">
+                      当前解析正文已更新；此分析保留原版本内容与来源，可明确生成新版本。
+                    </p>
+                  )}
                   {activeResult.configurationChanged && (
                     <p className="notice">
                       提示词、语言或模型配置已更新；此结果仍使用生成时的配置。

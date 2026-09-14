@@ -104,6 +104,17 @@ if __name__ == "__main__":
         if os.getenv("IPAPER_BROWSER_STRUCTURED") == "1":
             from tests.dual_translation_support import install
             install(application, directory, (first, second, third), origin, patch)
+        if os.getenv("IPAPER_BROWSER_READING_TOOLS") == "1":
+            def install_reading_files():
+                for paper_id, name in [('c-0','long-reading.pdf'),('c-1','scanned.pdf'),('c-2','no-outline.pdf')]:
+                    paper = PaperDAO.get_paper(paper_id)
+                    shutil.copyfile(Path(__file__).parent/'fixtures/reading-tools'/name,paper['file_path'])
+            with application.app_context():
+                run_as_identity(Identity(third['id'],third['username'],third['role']),install_reading_files)
+        if os.getenv("IPAPER_BROWSER_READING_SAMPLE"):
+            from tests.reading_sample_support import seed_reading_sample
+            with application.app_context():
+                print(seed_reading_sample(application,directory,third,os.environ["IPAPER_BROWSER_READING_SAMPLE"]),flush=True)
         server = make_server("127.0.0.2", 7191, application, threaded=True)
         print("Synthetic unified application ready", flush=True)
         try:

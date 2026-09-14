@@ -1,0 +1,27 @@
+{
+  "contentLicense": "CC0-1.0",
+  "author": "iPaper test suite",
+  "font": {
+    "name": "DejaVu Sans",
+    "source": "Debian fonts-dejavu-core /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "license": "Bitstream Vera / DejaVu license",
+    "sha256": "ae7b7855e115a5966d8b1b3f80f254ccc117ec86f9965e202ee2940453837280"
+  },
+  "files": [
+    {
+      "name": "long-reading.pdf",
+      "pages": 300,
+      "sha256": "23a1f8ff58889ea6258d147621344eafe760cfe2bc07c419bc9e4cf75276d8bd"
+    },
+    {
+      "name": "no-outline.pdf",
+      "pages": 1,
+      "sha256": "3041c2238939fb3dab3bdf792543d0a20059011f2590a5d9975c59eba76ee09d"
+    },
+    {
+      "name": "scanned.pdf",
+      "pages": 1,
+      "sha256": "e68b96c1127d474a270bbfd2bcb3b421784e218ebbe5734a0cc3b3158f843257"
+    }
+  ]
+}

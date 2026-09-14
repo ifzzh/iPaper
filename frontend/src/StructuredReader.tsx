@@ -17,6 +17,8 @@ import {
   MessageSquare,
   X,
   Layers,
+  Search,
+  PanelLeft,
 } from "lucide-react";
 import { PdfReader } from "./Reader";
 import { Chat, type Excerpt } from "./Chat";
@@ -30,6 +32,15 @@ import {
   languageLabels,
 } from "./Processing";
 import "./structured.css";
+import {
+  StructureNavigation,
+  SelectionPopup,
+  useReadingShortcut,
+  type Bookmark,
+  type SelectionInput,
+  type StructureHit,
+} from "./ReadingTools";
+import { MediaBoundary } from "./MediaViewer";
 
 type Cell = { text: string; rowspan: number; colspan: number; header: boolean };
 type Content = { text: string; caption: string; table: Cell[][] | null };
@@ -84,6 +95,7 @@ export function Reader(props: ReaderProps) {
     [source, setSource] = useState<Source | null>(null),
     [sourceError, setSourceError] = useState(""),
     [returnTo, setReturnTo] = useState<string | null>(null);
+  const [bookmarkTarget, setBookmarkTarget] = useState<Bookmark | null>(null);
   const [sourceExcerpt, setSourceExcerpt] = useState<any>(null);
   const results = useResource<{
     results: ProcessingResult[];
@@ -194,6 +206,24 @@ export function Reader(props: ReaderProps) {
     )
       setLayoutId(selectedLayout.id);
   }, [mode, selectedLayout?.id]);
+  function bookmarkNavigate(bookmark: Bookmark) {
+    if (!bookmark.canNavigate) {
+      setSourceError(bookmark.notice);
+      return;
+    }
+    setSource(null);
+    setBookmarkTarget(bookmark);
+    if (bookmark.resultId) {
+      setMode("structure");
+      setResultId(bookmark.resultId);
+    } else {
+      setMode(bookmark.documentKind === "original" ? "original" : "translated");
+      const layout = layoutResults.find(
+        (r) => r.documentId === bookmark.documentId,
+      );
+      if (layout) setLayoutId(layout.id);
+    }
+  }
   const controls = (
     <>
       <select
@@ -307,6 +337,12 @@ export function Reader(props: ReaderProps) {
               result={selected}
               onSource={navigateSource}
               onChanged={results.refresh}
+              bookmarkTarget={
+                bookmarkTarget?.resultId === selected.id
+                  ? bookmarkTarget
+                  : undefined
+              }
+              onBookmarkNavigate={bookmarkNavigate}
             />
           ) : (
             <div className="empty-state">
@@ -334,6 +370,20 @@ export function Reader(props: ReaderProps) {
               : undefined
           }
           onSource={navigateSource}
+          structureResult={results.data.results.find(
+            (r) => r.kind === "structure" && !r.stale,
+          )}
+          translationResults={results.data.results.filter(
+            (r) => r.kind === "structured_translation",
+          )}
+          cachedTranslationId={resultId}
+          onCachedTranslation={setResultId}
+          bookmarkTarget={
+            bookmarkTarget && !bookmarkTarget.resultId
+              ? bookmarkTarget
+              : undefined
+          }
+          onBookmarkNavigate={bookmarkNavigate}
         />
       )}
       {generate && (
@@ -371,10 +421,12 @@ function Sized({
   );
 }
 function MeasuredBlock({
+  searchHit,
   block,
   onMeasure,
   children,
 }: {
+  searchHit?: StructureHit | null;
   block: Block;
   onMeasure: (id: string, height: number) => void;
   children: ReactNode;
@@ -391,10 +443,17 @@ function MeasuredBlock({
   return (
     <article
       ref={ref}
-      className="structure-block"
+      className={"structure-block" + (searchHit ? " search-target-block" : "")}
       data-block={block.id}
       data-order={block.order}
     >
+      {searchHit && (
+        <p className="search-excerpt" role="status">
+          搜索匹配：{searchHit.before}
+          <mark>{searchHit.match}</mark>
+          {searchHit.after}
+        </p>
+      )}
       {children}
     </article>
   );
@@ -405,11 +464,13 @@ function BlockContent({
   label,
   translated,
   onSelection,
+  onSource,
 }: {
   content: Content;
   block: Block;
   label: string;
   translated: boolean;
+  onSource?: () => void;
   onSelection: (
     block: Block,
     field: string,
@@ -451,100 +512,106 @@ function BlockContent({
     }
   }
   return (
-    <section className="block-language">
-      <span className="block-language-label">{label}</span>
-      {block.imageUrl && !translated && (
-        <img
-          className="structure-image"
-          src={block.imageUrl}
-          alt={content.caption || "论文图片"}
-          loading="lazy"
-        />
-      )}
-      {content.table ? (
-        <div className="structure-table-scroll">
-          <table>
-            <tbody>
-              {content.table.map((row, r) => (
-                <tr key={r}>
-                  {row.map((cell, c) =>
-                    cell.header ? (
-                      <th
-                        key={c}
-                        data-field={`cell:${r}:${c}`}
-                        onMouseUp={select}
-                        onTouchEnd={select}
-                        rowSpan={cell.rowspan}
-                        colSpan={cell.colspan}
-                      >
-                        <AcademicText text={cell.text} />
-                      </th>
-                    ) : (
-                      <td
-                        key={c}
-                        data-field={`cell:${r}:${c}`}
-                        onMouseUp={select}
-                        onTouchEnd={select}
-                        rowSpan={cell.rowspan}
-                        colSpan={cell.colspan}
-                      >
-                        <AcademicText text={cell.text} />
-                      </td>
-                    ),
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        content.text && (
-          <div
-            className={
-              block.level
-                ? "block-section-title"
-                : ["equation", "interline_equation", "formula"].includes(
-                      block.type,
-                    )
-                  ? "structure-formula"
-                  : "structure-paragraph"
-            }
-            data-field="text"
-            onTouchEnd={
-              ["equation", "interline_equation", "formula"].includes(block.type)
-                ? undefined
-                : select
-            }
-            onMouseUp={
-              ["equation", "interline_equation", "formula"].includes(block.type)
-                ? undefined
-                : select
-            }
-          >
-            {["equation", "interline_equation", "formula"].includes(
-              block.type,
-            ) ? (
-              <MathFormula text={content.text} />
-            ) : (
-              <AcademicText text={content.text} />
-            )}
+    <MediaBoundary onSource={onSource}>
+      <section className="block-language">
+        <span className="block-language-label">{label}</span>
+        {block.imageUrl && !translated && (
+          <img
+            className="structure-image"
+            src={block.imageUrl}
+            alt={content.caption || "论文图片"}
+            loading="lazy"
+          />
+        )}
+        {content.table ? (
+          <div className="structure-table-scroll">
+            <table>
+              <tbody>
+                {content.table.map((row, r) => (
+                  <tr key={r}>
+                    {row.map((cell, c) =>
+                      cell.header ? (
+                        <th
+                          key={c}
+                          data-field={`cell:${r}:${c}`}
+                          onMouseUp={select}
+                          onTouchEnd={select}
+                          rowSpan={cell.rowspan}
+                          colSpan={cell.colspan}
+                        >
+                          <AcademicText text={cell.text} />
+                        </th>
+                      ) : (
+                        <td
+                          key={c}
+                          data-field={`cell:${r}:${c}`}
+                          onMouseUp={select}
+                          onTouchEnd={select}
+                          rowSpan={cell.rowspan}
+                          colSpan={cell.colspan}
+                        >
+                          <AcademicText text={cell.text} />
+                        </td>
+                      ),
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        )
-      )}
-      {content.caption && (
-        <div
-          className="structure-caption"
-          data-field="caption"
-          onMouseUp={select}
-          onTouchEnd={select}
-        >
-          <AcademicText text={content.caption} />
-        </div>
-      )}
-      {block.type === "table" && !content.table && (
-        <p className="muted">此表格仅有图片，未识别出可翻译的单元格正文。</p>
-      )}
-    </section>
+        ) : (
+          content.text && (
+            <div
+              className={
+                block.level
+                  ? "block-section-title"
+                  : ["equation", "interline_equation", "formula"].includes(
+                        block.type,
+                      )
+                    ? "structure-formula"
+                    : "structure-paragraph"
+              }
+              data-field="text"
+              onTouchEnd={
+                ["equation", "interline_equation", "formula"].includes(
+                  block.type,
+                )
+                  ? undefined
+                  : select
+              }
+              onMouseUp={
+                ["equation", "interline_equation", "formula"].includes(
+                  block.type,
+                )
+                  ? undefined
+                  : select
+              }
+            >
+              {["equation", "interline_equation", "formula"].includes(
+                block.type,
+              ) ? (
+                <MathFormula text={content.text} />
+              ) : (
+                <AcademicText text={content.text} />
+              )}
+            </div>
+          )
+        )}
+        {content.caption && (
+          <div
+            className="structure-caption"
+            data-field="caption"
+            onMouseUp={select}
+            onTouchEnd={select}
+          >
+            <AcademicText text={content.caption} />
+          </div>
+        )}
+        {block.type === "table" && !content.table && (
+          <p className="muted">此表格仅有图片，未识别出可翻译的单元格正文。</p>
+        )}
+      </section>
+    </MediaBoundary>
   );
 }
 function StructureContent(
@@ -555,6 +622,16 @@ function StructureContent(
   },
 ) {
   const { result, paper } = props;
+  const [navOpen, setNavOpen] = useState(false),
+    [navTab, setNavTab] = useState(
+      props.preferences.navigationPanel === "bookmarks"
+        ? "bookmarks"
+        : "outline",
+    ),
+    [searchHit, setSearchHit] = useState<StructureHit | null>(null),
+    [translateSelection, setTranslateSelection] =
+      useState<SelectionInput | null>(null);
+  const jumpSequence = useRef(0);
   const root = useRef<HTMLDivElement>(null),
     alive = useRef(true),
     controller = useRef(new AbortController()),
@@ -585,6 +662,81 @@ function StructureContent(
     body = useRef<HTMLDivElement>(null),
     resizeCleanup = useRef<(() => void) | null>(null);
   const [comparison, setComparison] = useState<Source | null>(null);
+  useReadingShortcut(body, () => {
+    setNavOpen(true);
+    setNavTab("search");
+  });
+  async function jumpBlock(
+    id: string,
+    offset = 0,
+    mode?: string,
+    hit?: StructureHit,
+  ) {
+    const sequence = ++jumpSequence.current;
+    try {
+      const b = await api(
+        `/api/results/${result.id}/blocks/${encodeURIComponent(id)}`,
+        "GET",
+        undefined,
+        controller.current.signal,
+      );
+      if (sequence !== jumpSequence.current || !alive.current) return;
+      if (mode && ["original", "translated", "bilingual"].includes(mode)) {
+        heights.current.clear();
+        setDisplay(mode as Display);
+      }
+      setSearchHit(hit || null);
+      restorePoint.current = { blockId: id, offset };
+      const response = await api(
+        `/api/results/${result.id}/blocks?after=${Math.max(-1, b.block.order - 1)}&limit=50`,
+        "GET",
+        undefined,
+        controller.current.signal,
+      );
+      if (sequence !== jumpSequence.current || !alive.current) return;
+      setBlocks(response.blocks);
+      setNext(response.nextCursor);
+      setScroll(0);
+      if (matchMedia("(max-width:900px)").matches) setNavOpen(false);
+    } catch (e) {
+      if (alive.current) setError(errorText(e));
+    }
+  }
+  useEffect(() => {
+    if (props.bookmarkTarget?.resultId === result.id)
+      void jumpBlock(
+        props.bookmarkTarget.location.blockId,
+        props.bookmarkTarget.location.offset,
+        props.bookmarkTarget.location.display,
+      );
+  }, [props.bookmarkTarget?.id]);
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  async function translateSelected() {
+    if (!selection) return;
+    const snapshot = selection;
+    try {
+      const source = await sourceFor(
+        snapshot.block,
+        snapshot.field,
+        snapshot.start,
+        snapshot.end,
+        snapshot.translated,
+      );
+      if (alive.current && selectionRef.current === snapshot)
+        setTranslateSelection({
+          text: source.text,
+          sourceId: source.id,
+          documentId: result.documentId,
+          resultId: result.id,
+          page: source.page,
+          document: snapshot.translated ? "translated" : "original",
+          title: paper.title,
+        });
+    } catch (e) {
+      if (alive.current) setError(errorText(e));
+    }
+  }
   useEffect(() => () => resizeCleanup.current?.(), []);
   useLayoutEffect(() => {
     body.current?.style.setProperty(
@@ -640,6 +792,7 @@ function StructureContent(
   async function load(cursor: number, replace = false) {
     if (loadLock.current) return;
     loadLock.current = true;
+    const sequence = jumpSequence.current;
     setLoading(true);
     try {
       const r = await api<{ blocks: Block[]; nextCursor: number | null }>(
@@ -648,7 +801,7 @@ function StructureContent(
         undefined,
         controller.current.signal,
       );
-      if (!alive.current) return;
+      if (!alive.current || sequence !== jumpSequence.current) return;
       setBlocks((previous) =>
         replace
           ? r.blocks
@@ -910,6 +1063,18 @@ function StructureContent(
   return (
     <>
       <div className="structure-subtoolbar">
+        <button aria-label="显示阅读导航" onClick={() => setNavOpen((v) => !v)}>
+          <PanelLeft size={17} />
+        </button>
+        <button
+          aria-label="搜索全文"
+          onClick={() => {
+            setNavOpen(true);
+            setNavTab("search");
+          }}
+        >
+          <Search size={17} />
+        </button>
         <div className="segmented">
           {(["original", "translated", "bilingual"] as Display[]).map((v) => (
             <button
@@ -952,10 +1117,38 @@ function StructureContent(
         ref={body}
         className={
           "structure-body " +
+          (navOpen ? "with-navigation " : "") +
           (chat ? "with-chat" : "") +
           (comparison ? " with-comparison" : "")
         }
       >
+        {navOpen && (
+          <StructureNavigation
+            paperId={paper.id}
+            result={result}
+            tab={navTab}
+            setTab={(v) => {
+              setNavTab(v);
+              if (v !== "search") setSearchHit(null);
+            }}
+            current={() => {
+              capture();
+              return (
+                lastPosition.current || {
+                  blockId: blocks[0]?.id,
+                  offset: 0,
+                  display,
+                }
+              );
+            }}
+            onJump={jumpBlock}
+            onBookmark={(b) => props.onBookmarkNavigate?.(b)}
+            onClose={() => {
+              setNavOpen(false);
+              setSearchHit(null);
+            }}
+          />
+        )}
         <section className="structure-panel">
           <Status error={error} loading={loading && !blocks.length} />
           <div
@@ -978,7 +1171,12 @@ function StructureContent(
             )}
             <Sized height={offsets[first] || 0} />
             {blocks.slice(first, last).map((block) => (
-              <MeasuredBlock key={block.id} block={block} onMeasure={measured}>
+              <MeasuredBlock
+                key={block.id}
+                block={block}
+                onMeasure={measured}
+                searchHit={searchHit?.blockId === block.id ? searchHit : null}
+              >
                 <div className="block-heading">
                   <span>
                     {block.source.page
@@ -1022,6 +1220,11 @@ function StructureContent(
                       block={block}
                       translated={false}
                       label="原文"
+                      onSource={
+                        block.source.precision !== "none" && !result.stale
+                          ? () => void navigate(block)
+                          : undefined
+                      }
                       onSelection={(
                         block,
                         field,
@@ -1048,6 +1251,11 @@ function StructureContent(
                         block={block}
                         translated
                         label="译文"
+                        onSource={
+                          block.source.precision !== "none" && !result.stale
+                            ? () => void navigate(block)
+                            : undefined
+                        }
                         onSelection={(
                           block,
                           field,
@@ -1103,7 +1311,8 @@ function StructureContent(
           {selection && (
             <div className="selection-actions">
               <Quote size={16} />
-              <span>已选择 {selection.text.length} 字</span>
+              <span>已选择 {Array.from(selection.text).length} 字</span>
+              <button onClick={() => void translateSelected()}>翻译</button>
               <button className="primary" onClick={() => void ask()}>
                 带来源提问
               </button>
@@ -1202,6 +1411,20 @@ function StructureContent(
           </>
         )}
       </div>
+      {translateSelection && (
+        <SelectionPopup
+          key={translateSelection.text + translateSelection.documentId}
+          paperId={paper.id}
+          selection={translateSelection}
+          onClose={() => setTranslateSelection(null)}
+          onAsk={(v) => {
+            setExcerpt(v);
+            setChat(true);
+            setComparison(null);
+            setTranslateSelection(null);
+          }}
+        />
+      )}
       {retryBlock && (
         <TranslationDialog
           paper={paper}
