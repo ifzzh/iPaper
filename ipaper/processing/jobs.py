@@ -27,13 +27,19 @@ class ProcessingJobs:
         return result
 
     def create(self, paper_id, kind, request, *, document_id=None, result_id=None, budget=None, reservation=None):
-        if kind not in {"parse", "translate", "parse_translate", "retranslate", "overview", "interpretation", "analysis_export"}:
+        if kind not in {"parse", "translate", "parse_translate", "retranslate", "overview", "interpretation", "analysis_export", "selection_translate"}:
             raise ProcessingError("invalid_processing_kind")
         budget = self.budget(budget)
         reservation = self.result_quota if reservation is None else reservation
         if type(reservation) is not int or not 0 < reservation <= self.result_quota:
             raise ProcessingError("invalid_quota_reservation")
-        key = fingerprint({"paper": paper_id, "kind": kind, "request": request, "budget": budget})
+        identity_request = request
+        if kind == "selection_translate":
+            # Equivalent verified source objects may have different UUIDs.
+            # Deduplicate their effective selection/configuration, not the
+            # incidental ID minted while opening the selection UI.
+            identity_request = {k: request.get(k) for k in ("cacheKey", "retryJobId", "renewAfter")}
+        key = fingerprint({"paper": paper_id, "kind": kind, "request": identity_request, "budget": budget})
         stamp, job_id = now(), identifier()
         with self.store.connection(write=True) as db:
             self.store.paper_exists(db, paper_id)
@@ -197,6 +203,8 @@ class ProcessingJobs:
     def resume(self, job_id):
         with self.store.connection(write=True) as db:
             job = self.store._owned(db, "processing_jobs", job_id)
+            if job["kind"] == "selection_translate":
+                raise ProcessingError("selection_explicit_retry_required", 409)
             if job.get("error") == "checkpoint_expired":
                 raise ProcessingError("checkpoint_expired", 409)
             if job["status"] not in {"partial", "interrupted", "failed", "cancelled"}:

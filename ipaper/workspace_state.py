@@ -20,10 +20,15 @@ def _read(key, default):
 
 
 def _write(key, value):
+    _write_many({key: value})
+
+
+def _write_many(values):
     db = get_db()
     try:
-        db.execute('INSERT INTO user_settings_v2(owner_id,key,value) VALUES(?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value=excluded.value',
-                   (current_user_id(), key, json.dumps(value, ensure_ascii=False)))
+        for key, value in values.items():
+            db.execute('INSERT INTO user_settings_v2(owner_id,key,value) VALUES(?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value=excluded.value',
+                       (current_user_id(), key, json.dumps(value, ensure_ascii=False)))
         db.commit()
     except Exception:
         db.rollback()
@@ -49,6 +54,9 @@ def register_workspace_state(app):
         try:
             if request.method == 'GET':
                 data = _read('workspace_v1', {})
+                navigation = _read('reading_navigation_v1', {})
+                if navigation.get('navigationPanel') in ('outline', 'thumbnails', 'bookmarks'):
+                    data['navigationPanel'] = navigation['navigationPanel']
                 data['tabs'] = [p for p in data.get('tabs', []) if PaperDAO.get_paper(p)]
                 if 'tabDocuments' in data:
                     data['tabDocuments'] = {k:v for k,v in data['tabDocuments'].items() if k in data['tabs']}
@@ -56,7 +64,7 @@ def register_workspace_state(app):
                     data['activePaper'] = None
                 return jsonify(data)
             data = body()
-            if set(data) - {'tabs', 'activePaper', 'theme', 'categoryWidth', 'detailWidth', 'chatWidth', 'thumbnailOpen', 'taskRefs', 'tabDocuments', 'readerResults'}:
+            if set(data) - {'tabs', 'activePaper', 'theme', 'categoryWidth', 'detailWidth', 'chatWidth', 'thumbnailOpen', 'navigationPanel', 'taskRefs', 'tabDocuments', 'readerResults'}:
                 raise ValueError()
             tabs = data.get('tabs', [])
             if not isinstance(tabs, list) or len(tabs) > 20 or any(not isinstance(p, str) or len(p) > 200 for p in tabs) or len(set(tabs)) != len(tabs):
@@ -74,6 +82,8 @@ def register_workspace_state(app):
                 if key in data and not _number(data[key], low, high):
                     raise ValueError()
             if 'thumbnailOpen' in data and not isinstance(data['thumbnailOpen'], bool):
+                raise ValueError()
+            if 'navigationPanel' in data and data['navigationPanel'] not in ('outline','thumbnails','bookmarks'):
                 raise ValueError()
             reader_results = data.get('readerResults', {})
             if not isinstance(reader_results, dict) or len(reader_results) > 20:
@@ -105,7 +115,12 @@ def register_workspace_state(app):
             for task in tasks:
                 if not isinstance(task, dict) or set(task) != {'id', 'kind', 'label'} or task['kind'] not in ('upload', 'import', 'export', 'analysis') or any(not isinstance(task[k], str) or len(task[k]) > 250 for k in ('id', 'label')):
                     raise ValueError()
-            _write('workspace_v1', data)
+            # Keep the legacy envelope readable/writable by 1.3 during rollback.
+            legacy = {k: v for k, v in data.items() if k != 'navigationPanel'}
+            values = {'workspace_v1': legacy}
+            if 'navigationPanel' in data:
+                values['reading_navigation_v1'] = {'navigationPanel': data['navigationPanel']}
+            _write_many(values)
             return jsonify(data)
         except ValueError:
             return jsonify(error='invalid_workspace_state'), 400

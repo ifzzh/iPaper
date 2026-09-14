@@ -35,7 +35,9 @@ class ReadOnlyStore(ProcessingStore):
             db.close()
 
 
-def prepare(database, papers, paper, destination, *, container_root=None):
+def prepare(
+    database, papers, paper, destination, *, container_root=None, reading_tools=False
+):
     destination = Path(destination)
     if destination.exists():
         raise ValueError("destination_exists")
@@ -73,6 +75,14 @@ def prepare(database, papers, paper, destination, *, container_root=None):
             *[store.result(r) for r in json.loads(parsed["config_json"])["parts"]],
             parsed,
         ]
+        if reading_tools:
+            results += [
+                dict(row)
+                for row in db.execute(
+                    "SELECT * FROM processing_results WHERE owner_id=? AND paper_id=? AND kind='structured_translation' AND parse_id=?",
+                    (store.owner, paper, parsed["id"]),
+                )
+            ]
         blocks = [
             dict(row)
             for result in results
@@ -80,6 +90,33 @@ def prepare(database, papers, paper, destination, *, container_root=None):
                 "SELECT * FROM processing_blocks WHERE result_id=?", (result["id"],)
             )
         ]
+    extra = {}
+    if reading_tools:
+        with store.connection() as db:
+            for table in (
+                "processing_block_translations",
+                "processing_translation_revisions",
+            ):
+                extra[table] = [
+                    dict(row)
+                    for result in results
+                    if result["kind"] == "structured_translation"
+                    for row in db.execute(
+                        "SELECT * FROM " + table + " WHERE result_id=?", (result["id"],)
+                    )
+                ]
+            for table in (
+                "understanding_artifacts",
+                "understanding_heads",
+                "understanding_evidence",
+            ):
+                extra[table] = [
+                    dict(row)
+                    for row in db.execute(
+                        "SELECT * FROM " + table + " WHERE owner_id=? AND paper_id=?",
+                        (store.owner, paper),
+                    )
+                ]
     metadata = {
         k: record[k] for k in ("id", "owner_id", "title", "authors", "abstract")
     }
@@ -94,6 +131,8 @@ def prepare(database, papers, paper, destination, *, container_root=None):
         "blockCount": body["blockCount"],
         "files": [],
     }
+    if reading_tools:
+        bundle["readingTables"] = extra
     destination.mkdir(mode=0o700, parents=True)
 
     def copy(source, relative, sha, maximum=1024**3):
@@ -131,6 +170,29 @@ def prepare(database, papers, paper, destination, *, container_root=None):
                     "artifacts/" + result["id"] + "/" + entry["path"],
                     entry["sha256"],
                 )
+        for row in extra.get("processing_translation_revisions", []):
+            copy(
+                safe_join(
+                    store.artifact_directory(row["result_id"]),
+                    row["body_file"],
+                    must_exist=True,
+                    require_file=True,
+                ),
+                "artifacts/" + row["result_id"] + "/" + row["body_file"],
+                row["sha256"],
+            )
+        for row in extra.get("understanding_artifacts", []):
+            for entry in json.loads(row["manifest_json"])["entries"]:
+                copy(
+                    safe_join(
+                        store.artifact_directory(row["id"]),
+                        entry["path"],
+                        must_exist=True,
+                        require_file=True,
+                    ),
+                    "artifacts/" + row["id"] + "/" + entry["path"],
+                    entry["sha256"],
+                )
         if sum(f["size"] for f in bundle["files"]) > 10 * 1024**3:
             raise ValueError("sample_size_limit")
         receipt = destination / "sample.json"
@@ -155,6 +217,11 @@ def main():
     for name in ("database", "papers", "paper", "destination"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--container-root")
+    parser.add_argument(
+        "--reading-tools",
+        action="store_true",
+        help="Include this paper's existing block translations and analysis only; never accounts, chats or credentials",
+    )
     args = parser.parse_args()
     print(
         json.dumps(
@@ -164,6 +231,7 @@ def main():
                 args.paper,
                 args.destination,
                 container_root=args.container_root,
+                reading_tools=args.reading_tools,
             )
         )
     )

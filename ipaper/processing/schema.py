@@ -87,3 +87,6 @@ CREATE TABLE IF NOT EXISTS processing_backup_leases (
 
 from .understanding_schema import SCHEMA as UNDERSTANDING_SCHEMA
 SCHEMA += UNDERSTANDING_SCHEMA
+
+from .reading_schema import SCHEMA as READING_SCHEMA
+SCHEMA += READING_SCHEMA

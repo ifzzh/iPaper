@@ -79,7 +79,7 @@ def register_processing_routes(app, service):
     def public_job(job):
         checkpoint=json.loads(job["checkpoint_json"])
         cloud_tasks=[{"part":int(index)+1,"batchId":value["batchId"]} for index,value in checkpoint.get("parts",{}).items() if value.get("batchId")]
-        return {"id": job["id"], "paperId": job["paper_id"], "kind": job["kind"], "resultId": job["result_id"] or checkpoint.get("understandingResultId"),
+        return {"id": job["id"], "paperId": job["paper_id"], "kind": job["kind"], "resultId": job["result_id"] or checkpoint.get("understandingResultId") or checkpoint.get("selectionTranslationId"),
                 "status": job["status"], "stage": job["stage"], "completed": job["completed"],
                 "total": job["total"], "error": job["error"], "createdAt": job["created_at"],
                 "updatedAt": job["updated_at"], "budget": json.loads(job["budget_json"]),
@@ -314,4 +314,6 @@ def register_processing_routes(app, service):
 
     from .understanding_routes import attach_understanding_routes
     attach_understanding_routes(blueprint,service,body)
+    from .reading_routes import attach_reading_routes
+    attach_reading_routes(blueprint,service,body,public_job)
     app.register_blueprint(blueprint)

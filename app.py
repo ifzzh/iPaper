@@ -189,7 +189,11 @@ def _sensitive_rate_policy():
     path = request.path
     if request.endpoint in {"workspace_state", "reading_position", "api_record_read_time", "api_record_reading", "processing.understanding_position", "processing.document_position", "processing.position"} and request.method in {"POST", "PUT"}:
         return "reading_state", 120, 60
-    if request.endpoint == "processing.create" and request.method == "POST":
+    if request.endpoint in {"processing.document", "processing.search", "processing.selection_preview"} and request.method == "POST":
+        return "reading_tools", 120, 60
+    if request.endpoint in {"processing.bookmarks", "processing.bookmark"} and request.method in {"POST", "PUT", "DELETE"}:
+        return "reading_bookmarks", 120, 60
+    if request.endpoint in {"processing.create", "processing.selection_create"} and request.method == "POST":
         return "processing", 30, 3600
     if path in {
         "/api/paper/analyze",

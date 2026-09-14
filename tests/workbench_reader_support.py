@@ -35,9 +35,12 @@ def fake_openai():
             if prompt == 'startup-failure':
                 self.send_error(400); return
             if not data.get('stream', False):
-                units = json.loads(prompt)
                 system = data['messages'][0]['content']
-                if 'Choose evidence for a single-paper' in system:
+                selection_mode = 'Translate the supplied academic excerpt' in system
+                units = [] if selection_mode else json.loads(prompt)
+                if selection_mode:
+                    content = '合成划词译文：' + prompt
+                elif 'Choose evidence for a single-paper' in system:
                     content = {'terms':['experiment','limitations','appendix'], 'unitIds':[units['index'][-1]['id']]}
                 elif 'evidence-based academic analysis' in system:
                     if units and 'label' in units[0]:
@@ -60,7 +63,7 @@ def fake_openai():
                         self.send_error(400);return
                     content = {unit['id']: '合成译文：' + unit['text'] for unit in units}
                 payload = {'id':'synthetic','object':'chat.completion','created':0,'model':'fixture',
-                    'choices':[{'index':0,'message':{'role':'assistant','content':json.dumps(content,ensure_ascii=False)},'finish_reason':'stop'}],
+                    'choices':[{'index':0,'message':{'role':'assistant','content':content if selection_mode else json.dumps(content,ensure_ascii=False)},'finish_reason':'stop'}],
                     'usage':{'prompt_tokens':100,'completion_tokens':100,'total_tokens':200}}
                 encoded=json.dumps(payload,ensure_ascii=False).encode()
                 self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(encoded)));self.end_headers();self.wfile.write(encoded);return

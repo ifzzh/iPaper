@@ -136,7 +136,12 @@ class PaperDAO:
     @staticmethod
     def delete_paper(paper_id):
         db = get_db()
-        db.execute('DELETE FROM papers WHERE id=? AND owner_id=?', (paper_id, current_user_id()))
+        owner = current_user_id()
+        # Additive reading state is removed in the same transaction. Payload
+        # files remain under the backup-aware bounded artifact cleanup.
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='reading_bookmarks'").fetchone():
+            db.execute('DELETE FROM reading_bookmarks WHERE paper_id=? AND owner_id=?', (paper_id,owner))
+        db.execute('DELETE FROM papers WHERE id=? AND owner_id=?', (paper_id, owner))
         db.commit()
 
     @staticmethod

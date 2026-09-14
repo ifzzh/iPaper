@@ -57,3 +57,21 @@ def test_failed_state_commit_is_reported_and_previous_data_survives(tmp_path, mo
     for value in ({'tabs':['a-0'],'tabDocuments':{'b-0':'original'}},{'tabs':[],'chatWidth':True},{'tabs':[],'taskRefs':[{'id':'x','kind':'upload','label':'x','secret':'not-allowed'}]}):
         assert client.put('/api/workspace/state',json=value,headers=headers).status_code==400
     assert client.put('/api/workspace/state',data='x'*65537,content_type='application/json',headers=headers).status_code in (400,413)
+
+
+def test_navigation_preference_is_owned_and_validated(tmp_path,monkeypatch):
+    app,_,_=make_workbench_fixture(tmp_path,monkeypatch)
+    a,b=app.test_client(),app.test_client();token=login(a);login(b,'reader_two')
+    state={'tabs':[],'navigationPanel':'bookmarks'}
+    assert a.put('/api/workspace/state',json=state,headers={'X-CSRF-Token':token}).status_code==200
+    assert a.get('/api/workspace/state').json['navigationPanel']=='bookmarks'
+    assert b.get('/api/workspace/state').json.get('navigationPanel') is None
+    assert a.put('/api/workspace/state',json={**state,'navigationPanel':'script'},headers={'X-CSRF-Token':token}).status_code==400
+    import json
+    with app.app_context():
+        stored = get_db().execute("SELECT value FROM user_settings_v2 WHERE key='workspace_v1'").fetchone()
+        assert 'navigationPanel' not in json.loads(stored['value'])
+    # An old client can continue saving its unchanged schema during rollback.
+    assert a.put('/api/workspace/state',json={'tabs':[],'theme':'dark'},headers={'X-CSRF-Token':token}).status_code==200
+    restored = a.get('/api/workspace/state').json
+    assert restored['navigationPanel']=='bookmarks' and restored['theme']=='dark'
