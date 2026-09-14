@@ -18,7 +18,7 @@ Existing services provide library management, BabelDOC translation, MinerU parsi
 A version number or screen on the development branch does not establish release availability. Consult the target [Release](https://github.com/ifzzh/iPaper/releases) for shipped capabilities, known issues and verification. Planned features below are not presented as complete.
 
 
-Release 1.3.0 adds separate AI overviews and detailed interpretations, shared original-text evidence, local/whole-paper question scopes, and Markdown/image-package/browser-print exports. Generation is explicit; existing results are read without paid requests. See [single-paper understanding](docs/development/single-paper-understanding.md) for scope and limitations.
+[Release 1.3.0](https://github.com/ifzzh/iPaper/releases/tag/v1.3.0) is deployed and verified. It adds separate AI overviews and detailed interpretations, shared original-text evidence, local/whole-paper question scopes, and Markdown/image-package/browser-print exports. Generation is explicit; existing results are read without paid requests. Web is 1.3.0; unchanged Workers retain their verified 1.2.0 digests. See [single-paper understanding](docs/development/single-paper-understanding.md) for scope and limitations.
 
 ## Capabilities and direction
 
@@ -29,7 +29,7 @@ Release 1.3.0 adds separate AI overviews and detailed interpretations, shared or
 | Reading | Continuous PDFs, thumbnails, tabs, independent reading positions, selection questions, verified source links and sidebar history/chat | Linked notes and annotations |
 | Translation | BabelDOC mono/dual PDFs and independently stored structured bilingual blocks; bounded tasks, cache reuse and block retries | Further language and layout refinements |
 | Accounts and data | Local accounts, user-scoped data, server-side model settings and persistent tasks | Preserve existing papers, settings and chat history |
-| Research | Papers and analysis results | Notes, library-operation agents, RAG, reviews and graphs |
+| Research | Independent AI overviews and detailed interpretations, source-backed local/whole-paper questions, offline analysis exports | Notes, library-operation agents, RAG, reviews and graphs |
 
 The current product has one primary interface, with no requirement to choose between “new” and “old” versions. Experimental entry points in earlier releases are historical transition behavior, not the product goal.
 

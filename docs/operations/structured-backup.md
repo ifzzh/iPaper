@@ -52,7 +52,7 @@ sudo -n python3 /PERSISTENT_BACKUP/rollback.py --backup /PERSISTENT_BACKUP --app
 
 1.3.0 的升级基线是已部署的 1.2.0。备份逻辑增加 `understanding_artifacts` 清单中的正文快照、授权图片、分析修订、分段检查点和离线导出；证据和问答范围索引随 SQLite 一致性快照保存。没有新增加密用途或密钥表，概览与解读引用现有 interpret 凭据。
 
-发布前必须重新记录当时三个组件和活动任务，不使用上述历史 1.2.0 发布目录去回退本阶段。回退继续保留当前数据库的理解索引及文件；1.2.0 不识别这些表但可以继续读写原有功能。详细本轮备份路径在完成正式切换后写入新 Release 与交付记录。
+发布前必须重新记录当时三个组件和活动任务，不使用上述历史 1.2.0 发布目录去回退本阶段。回退继续保留当前数据库的理解索引及文件；1.2.0 不识别这些表但可以继续读写原有功能。本轮实际备份路径及回退入口见下节。
 
 1.3.0 使用 `scripts/promote_understanding_acceptance.py` 单独提升已批准且通过真实验收的概览、长解读、证据、任务和两次问答。默认只校验，要求目标论文及现有解析版本完全匹配、凭据修订不变、没有既有分析头或活动任务；不复制账户、配置、密钥或旧解析，不覆盖已有结果。先完成一致性备份和停写，再执行明确的 `--apply`；私有样本不得附到 Release。
 
@@ -60,6 +60,8 @@ sudo -n python3 /PERSISTENT_BACKUP/rollback.py --backup /PERSISTENT_BACKUP --app
 ### 1.3.0 本次已执行的备份与回退入口
 
 正式切换前备份：`/mnt/raid1/backups/ipaper/releases/1.3.0-20260914T015657Z`。已校验313篇论文、669个原有文件、50个原有不可变产物；只新增16个理解产物索引及34个文件，没有覆盖旧论文、聊天、设置或密钥。升级后的日常备份实测包含84个不可变文件，含新概览、长解读、引用图片和导出。
+
+日常备份实例：`/mnt/raid1/backups/ipaper/database/20260914T020400Z`，manifest SHA-256 `b1d9a141b6ad03d38bd70948645341b6944be47950ebe2a6280aca86391c79cd`，84个文件共12,808,284字节。正式Web重启后的分析位置、PDF页码/缩放和历史按这份重启前快照核对通过。Web latest已在正式验收后核对为1.3.0的版本摘要。
 
 ```sh
 sudo -n python3 /mnt/raid1/backups/ipaper/releases/1.3.0-20260914T015657Z/rollback.py \
