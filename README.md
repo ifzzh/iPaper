@@ -18,9 +18,9 @@ Existing services provide library management, BabelDOC translation, MinerU parsi
 A version number or screen on the development branch does not establish release availability. Consult the target [Release](https://github.com/ifzzh/iPaper/releases) for shipped capabilities, known issues and verification. Planned features below are not presented as complete.
 
 
-[Release 1.3.0](https://github.com/ifzzh/iPaper/releases/tag/v1.3.0) is deployed and verified. It adds separate AI overviews and detailed interpretations, shared original-text evidence, local/whole-paper question scopes, and Markdown/image-package/browser-print exports. Generation is explicit; existing results are read without paid requests. Web is 1.3.0; unchanged Workers retain their verified 1.2.0 digests. See [single-paper understanding](docs/development/single-paper-understanding.md) for scope and limitations.
+[Release 1.3.0](https://github.com/ifzzh/iPaper/releases/tag/v1.3.0) introduced separate AI overviews and detailed interpretations, shared original-text evidence, local/whole-paper question scopes, and Markdown/image-package/browser-print exports. Generation is explicit; existing results are read without paid requests. Unchanged Workers retain their verified 1.2.0 digests. See [single-paper understanding](docs/development/single-paper-understanding.md) for scope and limitations.
 
-The 1.4.0 candidate adds full-document search, outlines and versioned bookmarks, cached paragraph translations in the original PDF, explicit selection translation, and figure/table/formula enlargement. No OCR or model request is triggered by searching or reading cached results. See [reading tools and limits](docs/development/reading-tools.md). Its target matrix is Web 1.4.0 with Workers 1.2.0; consult the Release before deployment.
+[Release 1.4.0](https://github.com/ifzzh/iPaper/releases/tag/v1.4.0) adds full-document search, outlines and versioned bookmarks, cached paragraph translations in the original PDF, explicit selection translation, and figure/table/formula enlargement. No OCR or model request is triggered by searching or reading cached results. See [reading tools and limits](docs/development/reading-tools.md). The compatible matrix is Web 1.4.0 with Workers 1.2.0; use the final Release digests for deployment.
 
 ## Capabilities and direction
 
@@ -28,8 +28,8 @@ The 1.4.0 candidate adds full-document search, outlines and versioned bookmarks,
 | --- | --- | --- |
 | Discovery | Daily arXiv, research topics, filtering, candidates and PDF asset processing | Discovery workflow refinements |
 | Library | PaperQuay-inspired category/list/detail workspace; upload, search, favorites, Reading List and Zotero RDF import | Library-operation agents |
-| Reading | Continuous PDFs, thumbnails, tabs, independent reading positions, selection questions, verified source links and sidebar history/chat | Linked notes and annotations |
-| Translation | BabelDOC mono/dual PDFs and independently stored structured bilingual blocks; bounded tasks, cache reuse and block retries | Further language and layout refinements |
+| Reading | Continuous PDFs, full-document search, outlines, bookmarks, figure enlargement, independent positions, verified sources and sidebar chat | Linked notes and annotations |
+| Translation | BabelDOC mono/dual PDFs and independently stored structured bilingual blocks; bounded tasks, paragraph-cache viewing, explicit selection translation and block retries | Further language and layout refinements |
 | Accounts and data | Local accounts, user-scoped data, server-side model settings and persistent tasks | Preserve existing papers, settings and chat history |
 | Research | Independent AI overviews and detailed interpretations, source-backed local/whole-paper questions, offline analysis exports | Notes, library-operation agents, RAG, reviews and graphs |
 
