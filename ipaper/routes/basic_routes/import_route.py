@@ -484,45 +484,11 @@ def register_import_routes(
             paper_ids.append(paper_id)
             _save_reading_list(paper_ids)
 
-    def _check_paper_already_imported(paper_data: Dict[str, Any]) -> bool:
-        """Check if the paper has been imported (via arXiv ID or title)"""
-        # 1. Try starting with URL extract arXiv ID
-        url = paper_data.get("extra", {}).get("url") or paper_data.get("url", "")
-        arxiv_id = None
-        if "arxiv.org" in url.lower():
-            arxiv_id = _extract_arxiv_id_from_url(url)
-        
-        # 2. if there is arXiv ID,pass paper_store Find
-        if arxiv_id:
-            existing_entry = paper_store.get_by_arxiv_id(arxiv_id)
-            if existing_entry:
-                print(f"[Import] The paper already exists (via arXiv ID）: {arxiv_id}")
-                return True
-        
-        # 3. if not arXiv ID, try to find by title
-        title = paper_data.get("title", "").strip()
-        if title:
-            # Go through all papers and check if the titles match
-            all_papers = paper_store.iter_all()
-            for paper in all_papers:
-                if paper.title and paper.title.strip().lower() == title.lower():
-                    print(f"[Import] The paper already exists (via title): {title[:50]}")
-                    return True
-        
-        return False
-
     def _filter_already_imported_papers(papers_data: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], int]:
-        """Filter out imported papers and return the list of unimported papers and the number of imported papers"""
-        remaining_papers = []
-        already_imported_count = 0
-        
-        for paper_data in papers_data:
-            if _check_paper_already_imported(paper_data):
-                already_imported_count += 1
-            else:
-                remaining_papers.append(paper_data)
-        
-        return remaining_papers, already_imported_count
+        # A title or unversioned identifier does not establish file identity.
+        # Keep imported versions; the owner-scoped metadata duplicate panel
+        # offers verified suggestions after safe admission.
+        return list(papers_data), 0
 
     def _update_task_progress(task_id: str, **kwargs):
         """Update task progress (thread safe)"""
