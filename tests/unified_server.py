@@ -115,6 +115,9 @@ if __name__ == "__main__":
             from tests.reading_sample_support import seed_reading_sample
             with application.app_context():
                 print(seed_reading_sample(application,directory,third,os.environ["IPAPER_BROWSER_READING_SAMPLE"]),flush=True)
+        if os.getenv("IPAPER_BROWSER_METADATA") == "1":
+            from tests.metadata_support import install as install_metadata
+            install_metadata(application)
         server = make_server("127.0.0.2", 7191, application, threaded=True)
         print("Synthetic unified application ready", flush=True)
         try:

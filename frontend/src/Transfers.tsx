@@ -1,3 +1,4 @@
+import { MetadataTask } from "./Metadata";
 import { ProcessingTaskDetails, processingNames } from "./Processing";
 import { useEffect, useState } from "react";
 import {
@@ -209,6 +210,7 @@ export function Tasks({
   onTask: (t: LocalTask) => void;
 }) {
   const translations = useResource<any>("/api/translations", { tasks: [] }),
+    metadata = useResource<any>("/api/metadata/jobs", {jobs:[]}),
     structured = useResource<any>("/api/processing/jobs", { jobs: [] }),
     analysis = useResource<any>("/api/paper/analyze/active", { tasks: [] }),
     [selected, setSelected] = useState<any>(null),
@@ -217,11 +219,13 @@ export function Tasks({
     const timer = setInterval(() => {
       translations.refresh();
       structured.refresh();
+      metadata.refresh();
       analysis.refresh();
     }, 5000);
     return () => clearInterval(timer);
   }, []);
   const tasks = [
+    ...metadata.data.jobs.map((j:any)=>({...j,kind:"metadata",task_id:j.id,title:`论文信息补全 · ${j.completed} / ${j.total}`})),
     ...structured.data.jobs.map((j: any) => ({
       ...j,
       kind: "structure",
@@ -292,7 +296,7 @@ export function Tasks({
           导出元数据
         </button>
       </header>
-      <Status error={error || translations.error || analysis.error} />
+      <Status error={error || translations.error || analysis.error || metadata.error} />
       <div className="task-list">
         {tasks.map((t: any) => (
           <button
@@ -343,7 +347,8 @@ export function Tasks({
           </button>
         </Modal>
       )}
-      {selected && selected.kind !== "structure" && (
+      {selected?.kind === "metadata" && <Modal title="论文信息补全" onClose={()=>setSelected(null)} wide><MetadataTask id={selected.task_id}/></Modal>}
+      {selected && !["structure","metadata"].includes(selected.kind) && (
         <TaskDetails
           task={selected}
           onClose={() => {

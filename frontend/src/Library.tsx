@@ -1,3 +1,4 @@
+import { MetadataDetails, MetadataEditor, MetadataBatchDialog } from "./Metadata";
 import { TranslationDialog } from "./Processing";
 import { ResizeHandle } from "./ResizeHandle";
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -128,7 +129,9 @@ export function Library({
     [failure, setFailure] = useState(""),
     [busy, setBusy] = useState(false),
     [category, setCategory] = useState<Category | null>(null),
-    [checked, setChecked] = useState<string[]>([]);
+    [checked, setChecked] = useState<string[]>([]),
+    [metadataRevision, setMetadataRevision] = useState(0),
+    [metadataSelection, setMetadataSelection] = useState<Record<string,unknown>|null>(null);
   const reading = useResource<any[]>("/api/reading-list", []),
     subset = useResource<any[]>(
       !["all", "favorites", "reading"].includes(filter)
@@ -150,7 +153,7 @@ export function Library({
     );
     if (query.trim())
       list = list.filter((p) =>
-        (p.title + " " + p.authors + " " + p.abstract + " " + p.year)
+        (p.title + " " + p.authors + " " + p.abstract + " " + p.year + " " + p.journal)
           .toLowerCase()
           .includes(query.toLowerCase()),
       );
@@ -340,6 +343,8 @@ export function Library({
         {checked.length > 0 && (
           <div className="batch-toolbar">
             <span>已选择 {checked.length} 篇</span>
+            <button onClick={()=>setMetadataSelection({paperIds:checked})}>补全信息</button>
+            <button onClick={()=>setChecked(visible.map(p=>p.id))}>选择全部匹配（{visible.length} 篇）</button>
             <button onClick={() => setAction("bulk-move")}>移动</button>
             <button
               onClick={() =>
@@ -357,6 +362,7 @@ export function Library({
             <button onClick={() => setChecked([])}>取消选择</button>
           </div>
         )}
+        <div className="metadata-list-actions"><button className="text-button" disabled={!visible.length} onClick={()=>setChecked(visible.slice((page-1)*50,page*50).map(p=>p.id))}>选择当前页</button><button className="text-button" disabled={!visible.length} onClick={()=>setMetadataSelection({paperIds:visible.map(p=>p.id)})}>补全全部匹配（{visible.length} 篇）</button></div>
         <div className="paper-list">
           {visible.slice((page - 1) * 50, page * 50).map((p) => (
             <article
@@ -546,47 +552,8 @@ export function Library({
                 {paper.abstract || "暂无摘要，可在编辑元数据中补充。"}
               </p>
             </section>
-            <section className="detail-section">
-              <div className="section-label">文献信息</div>
-              <dl>
-                <dt>年份</dt>
-                <dd>{paper.year || "—"}</dd>
-                <dt>发布日期</dt>
-                <dd>{dateText(paper.published)}</dd>
-              </dl>
-              {paper.notes && <p className="abstract">备注：{paper.notes}</p>}
-              {paper.affiliation && <p>机构：{paper.affiliation}</p>}
-              {(
-                [
-                  ["代码仓库", paper.github],
-                  ["项目主页", paper.homepage],
-                ] as const
-              ).map(([label, url]) =>
-                url && /^https?:\/\//.test(url) ? (
-                  <a
-                    key={label}
-                    className="text-button"
-                    href={url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {label}
-                    <ArrowUpRight size={14} />
-                  </a>
-                ) : null,
-              )}
-              {paper.arxiv_url && /^https?:\/\//.test(paper.arxiv_url) && (
-                <a
-                  className="text-button"
-                  href={paper.arxiv_url}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  访问来源
-                  <ArrowUpRight size={14} />
-                </a>
-              )}
-            </section>
+            <MetadataDetails key={paper.id+":"+metadataRevision} id={paper.id} onChanged={onChanged} onSelect={onSelect}/>
+            {paper.notes&&<section className="detail-section"><span className="section-label">文献备注</span><p>{paper.notes}</p></section>}
           </div>
         ) : (
           <div className="empty-state">
@@ -597,12 +564,15 @@ export function Library({
         )}
       </aside>
       {action === "edit" && paper && (
-        <EditPaper
-          paper={paper}
+        <MetadataEditor
+          key={paper.id}
+          id={paper.id}
           onClose={() => setAction("")}
-          onSaved={onChanged}
+          onSaved={()=>{setMetadataRevision(v=>v+1);onChanged()}}
         />
       )}
+      {metadataSelection&&<MetadataBatchDialog selection={metadataSelection} onClose={()=>setMetadataSelection(null)} onCreated={()=>{setMetadataSelection(null);onTasks()}}/>}
+      {action === "notes" && paper && <EditNotes paper={paper} onClose={()=>setAction("")} onSaved={onChanged}/>}
       {action === "translate" && paper && (
         <TranslationDialog
           paper={paper}
@@ -675,6 +645,7 @@ export function Library({
                 ? "移出 Reading List"
                 : "加入 Reading List"}
             </button>
+            <button onClick={() => setAction("notes")}><Pencil size={16}/>编辑文献备注</button>
             <button onClick={() => setAction("move")}>
               <FolderInput size={16} />
               移动到分类
@@ -762,7 +733,7 @@ function MoveDialog({
     </Modal>
   );
 }
-function EditPaper({
+function EditNotes({
   paper,
   onClose,
   onSaved,
@@ -771,21 +742,11 @@ function EditPaper({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [draft, setDraft] = useState({
-      title: paper.title,
-      authors: paper.authors,
-      year: paper.year,
-      abstract: paper.abstract,
-      github: paper.github || "",
-      homepage: paper.homepage || "",
-      notes: paper.notes || "",
-      affiliation: paper.affiliation || "",
-      journal: paper.journal || "",
-    }),
+  const [draft,setDraft]=useState({notes:paper.notes||""}),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   return (
-    <Modal title="编辑论文信息" onClose={onClose} wide>
+    <Modal title="文献备注" onClose={onClose} wide>
       <form
         onSubmit={async (e) => {
           e.preventDefault();
@@ -806,15 +767,7 @@ function EditPaper({
         }}
       >
         {Object.entries({
-          title: "标题",
-          authors: "作者",
-          year: "年份",
-          abstract: "摘要",
-          github: "代码仓库",
-          homepage: "项目主页",
           notes: "文献备注",
-          affiliation: "作者机构",
-          journal: "期刊 / 会议",
         }).map(([key, label]) => (
           <Field key={key} label={label}>
             {["abstract", "notes"].includes(key) ? (
