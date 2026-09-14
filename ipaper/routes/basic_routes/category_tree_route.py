@@ -412,13 +412,13 @@ def register_category_routes(
             # collect all BibTeX
             bibtex_entries = []
             for paper in all_papers:
-                # paper may be Paper object or dictionary
-                if hasattr(paper, "bibtex"):
-                    bibtex = paper.bibtex
-                elif isinstance(paper, dict):
-                    bibtex = paper.get("bibtex", "")
-                else:
-                    bibtex = ""
+                from ipaper.metadata.model import bibtex as render_bibtex
+                from ipaper.metadata.store import MetadataStore
+                from ipaper.database.connection import DB_PATH
+                from ipaper.security.identity import current_user_id
+                pid = paper.id if hasattr(paper,"id") else paper['id']
+                fields = MetadataStore(DB_PATH,current_user_id()).get(pid)['fields']
+                bibtex = render_bibtex(pid,fields)
 
                 if bibtex and bibtex.strip():
                     bibtex_entries.append(bibtex.strip())
@@ -439,7 +439,7 @@ def register_category_routes(
                 c if c.isalnum() or c in (" ", "-", "_") else "" for c in category_name
             )
             safe_name = safe_name.strip().replace(" ", "_")
-            filename = f"{safe_name}_bibtex.bib"
+            filename = f"iPaper-{safe_name}_bibtex.bib"
 
             # Create file object
             bibtex_bytes = bibtex_content.encode("utf-8")

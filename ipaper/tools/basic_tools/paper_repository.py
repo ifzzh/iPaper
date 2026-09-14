@@ -39,11 +39,14 @@ def save_paper_metadata(
         if not paper.file_path:
             paper.file_path = pdf_path
         
-        try:
-            PaperDAO.save_paper(paper.to_dict())
-        except Exception as exc:
-            print(f"Failed to save article metadata to DB: {exc}")
-            
+        payload = paper.to_dict()
+        inspection = paper.extra.pop("_metadata_inspection", None)
+        if inspection:
+            payload["_metadata_inspection"] = inspection
+        saved = PaperDAO.save_paper(payload)
+        if saved:
+            paper.update_from_dict(saved)
+
         # Optional: Delete legacy JSON if it exists to avoid confusion?
         # json_path = get_paper_json_path(pdf_path)
         # if os.path.exists(json_path):
@@ -167,10 +170,11 @@ def scan_papers_in_directory(
         )
         paper.mark_analysis_result(analysis_result_path)
 
+        paper.extra["category_id"] = category_id
+        save_paper_metadata(pdf_path, paper, upload_root=directory_path)
         registered = paper_store.upsert(
             paper, category_id=category_id, category_path=category_path_list
         )
-        save_paper_metadata(pdf_path, registered, upload_root=directory_path)
         papers.append(registered)
 
     # An upsert (including a concurrent upload) is not proof of a full scan.

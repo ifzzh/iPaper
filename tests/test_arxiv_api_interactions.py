@@ -125,41 +125,22 @@ class TestArxivApiMockedBehavior(unittest.TestCase):
             {"https": "http://arxiv-proxy.internal:7890"},
         )
 
-    def test_fetch_paper_by_arxiv_id_fast_uses_arxiv_client(self):
-        fake_client = FakeClient(make_paper())
-        with patch(
-            "ipaper.tools.basic_tools.upload_paper.arxiv.Client",
-            return_value=fake_client,
-        ), patch(
-            "ipaper.tools.basic_tools.upload_paper.arxiv.Search",
-            FakeSearch,
-        ):
-            result = fetch_paper_by_arxiv_id_fast("arXiv:2502.05383v1")
+    def test_import_exact_arxiv_preserves_requested_version(self):
+        record={'fields':{'title':'A Paper','authors':'Alice, Bob','author_list':[{'name':'Alice'},{'name':'Bob'}],'arxiv_id':'2502.05383','arxiv_version':'1'}}
+        with patch('ipaper.tools.basic_tools.upload_paper._import_arxiv_records',return_value=[record]) as query:
+            result=fetch_paper_by_arxiv_id_fast('arXiv:2502.05383v1')
+            self.assertEqual(result['arxiv_id'],'2502.05383v1')
+            query.assert_called_once_with({'id_list':'2502.05383v1'})
+            self.assertIsNone(fetch_paper_by_arxiv_id_fast('2502.05383v2'))
 
-        self.assertIsNotNone(result)
-        self.assertEqual(result["arxiv_id"], "2502.05383")
-        self.assertEqual(result["title"], "A Paper")
-        self.assertEqual(result["authors"], "Alice, Bob")
-        self.assertEqual(result["primary_category"], "cs.CV")
-        self.assertEqual(fake_client.last_search.id_list, ["2502.05383"])
-
-    def test_search_arxiv_by_title_and_author_fast_builds_query(self):
-        fake_client = FakeClient(make_paper(entry_id="https://arxiv.org/abs/2502.05383v2"))
-        with patch(
-            "ipaper.tools.basic_tools.upload_paper.arxiv.Client",
-            return_value=fake_client,
-        ), patch(
-            "ipaper.tools.basic_tools.upload_paper.arxiv.Search",
-            FakeSearch,
-        ):
-            result = search_arxiv_by_title_and_author_fast("A: Better Title", "Alice")
-
-        self.assertIsNotNone(result)
-        self.assertEqual(
-            fake_client.last_search.query,
-            'ti:"A  Better Title" AND au:"Alice"',
-        )
-        self.assertEqual(result["arxiv_id"], "2502.05383")
+    def test_import_title_requires_authors_and_unique_candidate(self):
+        record={'fields':{'title':'A: Better Title','authors':'Alice, Bob','author_list':[{'name':'Alice'},{'name':'Bob'}],'arxiv_id':'2502.05383','arxiv_version':'2'}}
+        with patch('ipaper.tools.basic_tools.upload_paper._import_arxiv_records',return_value=[record]):
+            self.assertIsNone(search_arxiv_by_title_and_author_fast('A: Better Title','Alice'))
+            self.assertIsNone(search_arxiv_by_title_and_author_fast('Unrelated title','Alice, Bob'))
+            self.assertEqual(search_arxiv_by_title_and_author_fast('A: Better Title','Alice, Bob')['arxiv_id'],'2502.05383v2')
+        with patch('ipaper.tools.basic_tools.upload_paper._import_arxiv_records',return_value=[record,record]):
+            self.assertIsNone(search_arxiv_by_title_and_author_fast('A: Better Title','Alice, Bob'))
 
     def test_search_arxiv_by_title_only_fast_builds_query(self):
         fake_client = FakeClient(make_paper(entry_id="https://arxiv.org/abs/2502.05383v3"))

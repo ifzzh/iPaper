@@ -40,7 +40,6 @@ from ipaper.tools.basic_tools.daily_arxiv import (
 from ipaper.tools.basic_tools.daily_arxiv_assets import DailyAssetCoordinator
 from ipaper.tools.basic_tools.daily_arxiv_quality import get_default_quality_config
 from ipaper.tools.basic_tools.daily_arxiv_quality import normalize_quality_config
-from ipaper.tools.basic_tools.upload_paper import fetch_bibtex_from_dblp
 
 
 _default_daily_executor = BoundedExecutor(
@@ -82,36 +81,6 @@ def register_daily_arxiv_routes(
         response = jsonify({"success": False, "error": "daily_arxiv_queue_full"})
         response.headers["Retry-After"] = "60"
         return response, 429
-
-    def _fetch_bibtex_background(
-        paper_id: str,
-        title: str,
-        authors: str,
-        arxiv_id: str,
-        file_path: str,
-        category_id: str,
-        category_path: List[str],
-    ):
-        """Background acquisition BibTeX and update the paper"""
-        try:
-            print(f"[Backstage BibTeX] Start getting BibTeX: {title[:50]}...")
-            bibtex = fetch_bibtex_from_dblp(title, authors, arxiv_id)
-
-            if bibtex:
-                paper = paper_store.get(paper_id)
-                if paper:
-                    paper.bibtex = bibtex
-                    paper_store.upsert(
-                        paper, category_id=category_id, category_path=category_path
-                    )
-                    save_paper_metadata(file_path, paper)
-                    print(f"[Backstage BibTeX] ✅ BibTeX updated: {paper_id}")
-                else:
-                    print(f"[Backstage BibTeX] ❌ Paper not found: {paper_id}")
-            else:
-                print(f"[Backstage BibTeX] ❌ Not obtained BibTeX")
-        except Exception as exc:
-            print(f"[Backstage BibTeX] ❌ get BibTeX fail: {exc}")
 
     # Make sure the temporary directory exists
     os.makedirs(temp_papers_dir, exist_ok=True)
@@ -760,7 +729,8 @@ def register_daily_arxiv_routes(
                 upload_source="daily_arxiv",
             )
 
-            # Save metadata
+            # Save before publishing the in-memory entry.
+            paper.extra["category_id"] = category_id
             save_paper_metadata(target_path, paper)
 
             # Register to paper_store
@@ -777,22 +747,7 @@ def register_daily_arxiv_routes(
                 except Exception as e:
                     print(f"Failed to add to to-read list: {e}")
 
-            # 【Background acquisition BibTeX(priority DBLP, use after failure arXiv）】
-            if paper.title:
-                try:
-                    auxiliary_executor.submit(
-                        _fetch_bibtex_background,
-                        paper.id,
-                        paper.title,
-                        paper.authors or "",  # authors Can be empty
-                        arxiv_id,
-                        target_path,
-                        category_id,
-                        category_path,
-                    )
-                    print("[DailyArxiv] Paper added; BibTeX queued")
-                except QueueFull:
-                    print("[DailyArxiv] BibTeX skipped because the auxiliary queue is full")
+            # The paper transaction has queued owner-scoped metadata enrichment.
 
             return jsonify(
                 {

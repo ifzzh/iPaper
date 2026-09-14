@@ -5,7 +5,6 @@ import os
 import re
 import shutil
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Tuple
 
@@ -27,12 +26,8 @@ from ipaper.security.paths import (
 )
 from ipaper.security.identity import current_user_id
 from ipaper.tools.basic_tools.paper_repository import scan_papers_in_directory
-from ipaper.tools.basic_tools.upload_paper import (
-    search_arxiv_by_title_only,
-)
 
 
-_paper_workers = ThreadPoolExecutor(max_workers=4, thread_name_prefix="paper-metadata")
 
 
 class GetCategoriesFn(Protocol):
@@ -450,103 +445,41 @@ def register_paper_operation_routes(
 
             paper, category_path, category_id = result
 
-            # Check whether the user has modified it manually title
-            old_title = paper.title
-            title_changed = False
-            if "title" in data and data["title"] != old_title:
-                title_changed = True
-                new_title = data["title"]
-                print(
-                    f"[Title update] User changes title: '{old_title}' → '{new_title}'"
-                )
-
+            # Validate on a detached object. A failed transaction must not alter
+            # the live in-memory entry shown by another request.
+            checked = Paper.from_dict(paper.to_dict())
             try:
-                paper.update_user_fields(data)
+                checked.update_user_fields(data)
             except PaperUpdateError as exc:
-                payload = {"error": exc.reason}
-                if exc.fields:
-                    payload["fields"] = list(exc.fields)
-                return jsonify(payload), 400
-            paper.extra["updated_date"] = datetime.now().isoformat()
-
-            if paper.file_path:
-                save_paper_metadata(paper.file_path, paper)
-
-            # If the user modified title, automatically re-crawl in the background
-            if title_changed and new_title:
-
-                def _auto_refresh_on_title_change():
-                    try:
-                        print(
-                            f"[Automatic recapture] The title has been modified, start crawling again: {new_title}"
-                        )
-
-                        # Search using the new interface arXiv
-                        best_match = search_arxiv_by_title_only(new_title)
-
-                        if best_match:
-                            print(
-                                f"[Automatic recapture] found match: {best_match.get('title')[:50]}..."
-                            )
-
-                            # Update only arXiv Related information, do not modify the manual settings set by the user title
-                            paper_obj = paper_store.get(paper_id)
-                            if paper_obj:
-                                # Update except title All fields except
-                                paper_obj.authors = best_match.get("authors", "")
-                                paper_obj.affiliation = best_match.get(
-                                    "affiliation", ""
-                                )
-                                paper_obj.abstract = best_match.get("abstract", "")
-                                paper_obj.year = best_match.get("year", "")
-                                paper_obj.bibtex = best_match.get("bibtex", "")
-                                paper_obj.arxiv_id = best_match.get("arxiv_id", "")
-                                paper_obj.arxiv_published_date = best_match.get(
-                                    "published_date"
-                                )
-                                paper_obj.summary = best_match.get("summary", "")
-                                paper_obj.extra["auto_refreshed_date"] = (
-                                    datetime.now().isoformat()
-                                )
-
-                                # Save updates
-                                paper_store.upsert(
-                                    paper_obj,
-                                    category_id=category_id,
-                                    category_path=category_path,
-                                )
-                                if paper_obj.file_path:
-                                    save_paper_metadata(paper_obj.file_path, paper_obj)
-
-                                print(
-                                    f"[Automatic recapture] Completed: Author, affiliation, abstract and other information has been updated"
-                                )
-                            else:
-                                print(
-                                    f"[Automatic recapture] warn: not found paper {paper_id}"
-                                )
-                        else:
-                            print(
-                                f"[Automatic recapture] No match found, keep the information entered by the user unchanged"
-                            )
-
-                    except Exception as exc:  # noqa: BLE001
-                        print(f"[Automatic recapture] fail: {exc}")
-
-                _paper_workers.submit(_auto_refresh_on_title_change)
+                return jsonify(error=exc.reason, fields=list(exc.fields)), 400
+            from ipaper.metadata.model import LEGACY, MetadataError
+            from ipaper.metadata.store import MetadataStore
+            from ipaper.database.connection import DB_PATH
+            from ipaper.database.dao.paper_dao import PaperDAO
+            metadata = {k:v for k,v in data.items() if k in LEGACY}
+            try:
+                state = {k:v for k,v in data.items() if k not in LEGACY}
+                if metadata:
+                    MetadataStore(DB_PATH, current_user_id()).edit(paper_id, metadata,state_changes=state)
+                    saved = PaperDAO.get_paper(paper_id)
+                else:
+                    saved = PaperDAO.patch_state(paper_id,state) if state else PaperDAO.get_paper(paper_id)
+            except MetadataError as exc:
+                return jsonify(error=exc.code),exc.status
+            paper = paper_store.upsert(Paper.from_dict(saved),category_id=category_id,category_path=category_path)
 
             return jsonify(
                 {
                     "success": True,
                     "message": "Paper updated successfully",
                     "paper": paper.to_dict(),
-                    "auto_refresh_triggered": title_changed,
+                    "auto_refresh_triggered": False,
                 }
             )
 
         except Exception as exc:  # noqa: BLE001
             print(f"Failed to update paper: {exc}")
-            return jsonify({"success": False, "error": str(exc)}), 500
+            return jsonify({"success": False, "error": "metadata_storage_failed"}), 503
 
     @app.route("/api/reading-list", methods=["GET"])
     def api_get_reading_list():
@@ -686,12 +619,9 @@ def register_paper_operation_routes(
 
             paper, category_path, category_id = result
 
-            # Cumulative reading time increment
-            paper.record_read_time(int(increment))
-
-            # save to file
-            if paper.file_path:
-                save_paper_metadata(paper.file_path, paper)
+            from ipaper.database.dao.paper_dao import PaperDAO
+            saved = PaperDAO.patch_state(paper_id, {}, increments={'read_time': int(increment)})
+            paper = paper_store.upsert(Paper.from_dict(saved), category_id=category_id, category_path=category_path)
 
             # Update reading history
             today = datetime.now().strftime("%Y-%m-%d")
@@ -723,12 +653,9 @@ def register_paper_operation_routes(
 
             paper, category_path, category_id = result
 
-            # Cumulative interpretation reading time increment
-            paper.record_analysis_view_time(int(increment))
-
-            # save to file
-            if paper.file_path:
-                save_paper_metadata(paper.file_path, paper)
+            from ipaper.database.dao.paper_dao import PaperDAO
+            saved = PaperDAO.patch_state(paper_id, {}, increments={'analysis_view_time': int(increment)})
+            paper = paper_store.upsert(Paper.from_dict(saved), category_id=category_id, category_path=category_path)
 
             return jsonify(
                 {"success": True, "analysis_view_time": paper.analysis_view_time}
@@ -740,170 +667,13 @@ def register_paper_operation_routes(
 
     @app.route("/api/paper/<paper_id>/refresh-metadata", methods=["POST"])
     def api_refresh_paper_metadata(paper_id: str):
-        """Re-crawl PDF metadata"""
+        from ipaper.metadata.model import MetadataError
+        service = app.extensions.get("metadata")
+        if service is None:
+            return jsonify(error="metadata_unavailable"),503
         try:
-            result = find_paper(paper_id)
-            if not result:
-                return jsonify({"success": False, "error": "Paper not found"}), 404
-
-            paper, category_path, category_id = result
-            try:
-                file_path = resolve_paper_file(paper, category_id)
-            except PathSecurityError:
-                return unsafe_stored_path_response()
-
-            # Start background thread processing
-            def _refresh_metadata_async():
-                try:
-                    print(f"[Re-crawl] Start processing: {file_path}")
-
-                    filename = os.path.basename(file_path)
-                    validation_id = str(uuid.uuid4())
-                    try:
-                        with open(file_path, "rb") as source:
-                            document_client.stage(validation_id, "pdf_inspect", source)
-                        DocumentJobDAO.create(validation_id, "pdf_inspect", paper_id)
-                        document_client.create(validation_id, "pdf_inspect")
-                        state = document_client.wait(validation_id, timeout=100)
-                        DocumentJobDAO.update(
-                            validation_id, state["status"],
-                            progress=int(state.get("progress") or 0), error=state.get("error")
-                        )
-                        if state["status"] != "completed":
-                            return
-                        result = document_client.result_json(validation_id)
-                        raw_metadata = result.get("metadata", {})
-                        paper_info = {
-                            "title": raw_metadata.get("title", ""),
-                            "authors": raw_metadata.get("author", ""),
-                            "subject": raw_metadata.get("subject", ""),
-                            "keywords": raw_metadata.get("keywords", ""),
-                        }
-                    finally:
-                        try:
-                            document_client.cleanup(validation_id)
-                        except Exception:
-                            pass
-
-                    if not paper_info:
-                        print("[Re-crawl] Unable to obtain paper information")
-                        return
-
-                    print(f"[Re-crawl] found match: {paper_info.get('title')[:50]}...")
-
-                    # Use the information obtained
-                    metadata = paper_info
-                    arxiv_id = paper.arxiv_id
-                    arxiv_published_date = paper.arxiv_published_date
-
-                    # step2: Rename the file according to the new title (if the title changes)
-                    current_filename = os.path.basename(file_path)
-                    new_filename = current_filename
-                    new_file_path = file_path
-                    if metadata and metadata.get("title"):
-
-                        def _clean_filename(text: Optional[str]) -> Optional[str]:
-                            if not text:
-                                return None
-                            cleaned = text
-                            cleaned = re.sub(r'[<>:"/\\|?*]', "", cleaned)
-                            cleaned = re.sub(r"\s+", " ", cleaned)
-                            cleaned = cleaned.strip()
-                            return cleaned[:200] if cleaned else None
-
-                        clean_title = _clean_filename(metadata["title"])
-                        if (
-                            clean_title
-                            and clean_title != os.path.splitext(current_filename)[0]
-                        ):
-                            new_filename = f"{clean_title}.pdf"
-                            new_file_path = str(
-                                paper_path(
-                                    upload_folder,
-                                    category_id,
-                                    new_filename,
-                                )
-                            )
-
-                            counter = 1
-                            original_new_filename = new_filename
-                            while (
-                                os.path.exists(new_file_path)
-                                and new_file_path != file_path
-                            ):
-                                name, ext = os.path.splitext(original_new_filename)
-                                new_filename = f"{name}_{counter}{ext}"
-                                new_file_path = str(
-                                    paper_path(
-                                        upload_folder,
-                                        category_id,
-                                        new_filename,
-                                    )
-                                )
-                                counter += 1
-
-                            # Rename file
-                            if new_file_path != file_path:
-                                try:
-                                    source_assets = paper_asset_paths(
-                                        upload_folder, file_path
-                                    )
-                                    target_assets = paper_asset_paths(
-                                        upload_folder, new_file_path
-                                    )
-                                    move_asset_bundle(source_assets, target_assets)
-                                    print(
-                                        f"[Re-crawl] File has been renamed: {new_filename}"
-                                    )
-
-                                except Exception as exc:  # noqa: BLE001
-                                    print(f"[Re-crawl] Rename failed: {exc}")
-                                    new_file_path = file_path
-                                    new_filename = current_filename
-
-                    # step3: renew Paper object
-                    paper_obj = paper_store.get(paper_id)
-                    if paper_obj and metadata:
-                        paper_obj.filename = new_filename
-                        paper_obj.file_path = new_file_path
-                        paper_obj.title = metadata.get("title") or paper_obj.title
-                        paper_obj.authors = metadata.get("authors") or paper_obj.authors
-                        paper_obj.arxiv_id = arxiv_id
-                        # if there is arxiv_id,set up arxiv_url
-                        if arxiv_id:
-                            paper_obj.arxiv_url = (
-                                metadata.get("arxiv_url")
-                                or f"https://arxiv.org/abs/{arxiv_id}"
-                            )
-                        paper_obj.arxiv_published_date = arxiv_published_date
-                        paper_obj.keywords = metadata.get("keywords") or paper_obj.keywords
-                        paper_obj.subject = metadata.get("subject") or paper_obj.subject
-                        paper_obj.extra["updated_date"] = datetime.now().isoformat()
-
-                        # Save updates
-                        paper_store.upsert(
-                            paper_obj,
-                            category_id=category_id,
-                            category_path=category_path,
-                        )
-                        save_paper_metadata(new_file_path, paper_obj)
-                        print(f"[Re-crawl] Finish: {new_filename}")
-                    else:
-                        print(f"[Re-crawl] warn: not found paper {paper_id}")
-
-                except Exception as exc:  # noqa: BLE001
-                    print(f"[Re-crawl] fail: {exc}")
-
-            _paper_workers.submit(_refresh_metadata_async)
-
-            return jsonify(
-                {
-                    "success": True,
-                    "message": "Metadata crawling has started and will be processed in the background",
-                    "paper_id": paper_id,
-                }
-            )
-
-        except Exception as exc:  # noqa: BLE001
-            print(f"Failed to start re-crawling: {exc}")
-            return jsonify({"success": False, "error": str(exc)}), 500
+            task_id=service.store().create([paper_id])
+            service.wake.set()
+            return jsonify(success=True, task_id=task_id, paper_id=paper_id, status="queued"),202
+        except MetadataError as exc:
+            return jsonify(error=exc.code),exc.status

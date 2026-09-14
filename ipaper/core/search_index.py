@@ -435,8 +435,9 @@ class SearchIndex:
                 if is_db_error:
                     print(f"Database problem detected while indexing papers（Maybe the index is out of sync）: {e}")
                     self._repair_database()
-                else:
-                    raise
+                # Repair does not prove this mutation was replayed. Retain the
+                # metadata outbox event so the current database row is retried.
+                raise
 
 
     def remove_paper(self, paper_id: str) -> None:
@@ -469,8 +470,9 @@ class SearchIndex:
                 if is_db_error:
                     print(f"Database problem detected when deleting paper（Maybe the index is out of sync）: {e}")
                     self._repair_database()
-                else:
-                    raise
+                # Repair does not prove this mutation was replayed. Retain the
+                # metadata outbox event so the current database row is retried.
+                raise
 
 
     def update_paper_category(self, paper_id: str, category_id: Optional[str]) -> None:

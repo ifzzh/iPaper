@@ -285,3 +285,6 @@ CREATE TABLE IF NOT EXISTS ai_providers (
     FOREIGN KEY(created_by) REFERENCES users(id)
 );
 """
+
+from ipaper.metadata.schema import SCHEMA as METADATA_SCHEMA
+SCHEMA_SCRIPT += METADATA_SCHEMA

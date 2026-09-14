@@ -6,7 +6,6 @@ import os
 import io
 import re
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Dict, Optional, Protocol
 
@@ -20,11 +19,8 @@ from ipaper.database.dao.document_job_dao import DocumentJobDAO
 from ipaper.document_worker.client import DocumentWorkerClient
 from ipaper.document_worker.safety import DocumentLimitError, bounded_copy
 from ipaper.security.paths import safe_join
-from ipaper.tools.basic_tools.upload_paper import (
-    fetch_bibtex_from_dblp, fetch_paper_by_arxiv_id_fast)
 
 
-_url_import_workers = ThreadPoolExecutor(max_workers=2, thread_name_prefix="url-import")
 
 
 class GetCategoriesFn(Protocol):
@@ -59,8 +55,6 @@ def _extract_arxiv_id_from_url(url: str) -> Optional[str]:
         match = re.search(pattern, url, re.IGNORECASE)
         if match:
             arxiv_id = match.group(1)
-            if "v" in arxiv_id:
-                arxiv_id = arxiv_id.split("v")[0]
             return arxiv_id
     return None
 
@@ -133,35 +127,6 @@ def register_update_from_url_routes(
     def _add_to_reading_list(paper_id: str) -> None:
         ReadingListDAO.add_item(paper_id, datetime.now().isoformat())
 
-    def _fetch_dblp_bibtex_background(
-        paper_id: str,
-        title: str,
-        authors: str,
-        arxiv_id: str,
-        file_path: str,
-        category_id: str,
-        category_path: list[str],
-    ):
-        """Background acquisition DBLP BibTeX and update the paper"""
-        try:
-            print(f"[Backstage DBLP] Start getting BibTeX: {title[:50]}...")
-            bibtex = fetch_bibtex_from_dblp(title, authors, arxiv_id)
-
-            if bibtex:
-                paper = paper_store.get(paper_id)
-                if paper:
-                    paper.bibtex = bibtex
-                    paper_store.upsert(
-                        paper, category_id=category_id, category_path=category_path
-                    )
-                    save_paper_metadata(file_path, paper)
-                    print(f"[Backstage DBLP] ✅ BibTeX updated: {paper_id}")
-                else:
-                    print(f"[Backstage DBLP] ❌ Paper not found: {paper_id}")
-            else:
-                print(f"[Backstage DBLP] ❌ Not obtained BibTeX")
-        except Exception as exc:
-            print(f"[Backstage DBLP] ❌ get BibTeX fail: {exc}")
 
     @app.route("/api/upload/arxiv", methods=["POST"])
     def api_upload_arxiv():
@@ -219,6 +184,7 @@ def register_update_from_url_routes(
                 if state["status"] != "completed":
                     document_client.cleanup(validation_id)
                     return jsonify({"success": False, "error": state.get("error") or "pdf_invalid"}), 422
+                inspection = document_client.result_json(validation_id)
                 source_pdf = document_client.job_directory(validation_id) / "work" / "input.pdf"
             except Exception:
                 try:
@@ -250,37 +216,12 @@ def register_update_from_url_routes(
 
             print(f"PDF saved to: {file_path}")
 
-            # 【Get it quickly】only from arXiv API Get information without waiting DBLP
-            metadata = fetch_paper_by_arxiv_id_fast(arxiv_id)
-
-            if not metadata:
-                print(f"warn: Unable to access from arXiv API Get information")
-                metadata = {"arxiv_id": arxiv_id}
-            else:
-                print(f"successfully from arXiv API Get paper information: {metadata.get('title')}")
-
-            new_filename = filename
-            if metadata.get("title"):
-                clean_title = _clean_filename(metadata["title"])
-                if clean_title:
-                    new_filename = f"{clean_title}.pdf"
-                    new_file_path = str(safe_join(category_folder, new_filename))
-
-                    counter = 1
-                    original_new_filename = new_filename
-                    while os.path.exists(new_file_path):
-                        name, ext = os.path.splitext(original_new_filename)
-                        new_filename = f"{name}_{counter}{ext}"
-                        new_file_path = str(safe_join(category_folder, new_filename))
-                        counter += 1
-
-                    try:
-                        os.rename(file_path, new_file_path)
-                        file_path = new_file_path
-                        filename = new_filename
-                        print(f"File has been renamed to: {filename}")
-                    except Exception as exc:  # noqa: BLE001
-                        print(f"Failed to rename file: {exc}")
+            # Admission is independent of bibliographic network availability.
+            # The verified local inspection is retained before staging cleanup;
+            # the persistent metadata queue resolves the exact arXiv version.
+            embedded = inspection.get("metadata", {})
+            metadata = {"title": embedded.get("title") or arxiv_id,
+                        "authors": embedded.get("author") or ""}
 
             paper_id = str(uuid.uuid4())
             # Build arXiv URL(Priority is given to using user-provided URL, otherwise according to arxiv_id build)
@@ -324,25 +265,13 @@ def register_update_from_url_routes(
             if use_temp_dir:
                 paper.upload_source = "reading_list_url"
 
+            paper.extra["_metadata_inspection"] = inspection
+            paper.extra["category_id"] = category_id
+            save_paper_metadata(file_path, paper)
             registered_paper = paper_store.upsert(
                 paper, category_id=category_id, category_path=category_path
             )
-            save_paper_metadata(file_path, registered_paper)
             _add_to_reading_list(registered_paper.id)
-
-            # 【Background acquisition BibTeX(priority DBLP, use after failure arXiv）】
-            if metadata.get("title"):
-                _url_import_workers.submit(
-                    _fetch_dblp_bibtex_background,
-                    paper_id,
-                    metadata["title"],
-                    metadata.get("authors", ""),
-                    arxiv_id,
-                    file_path,
-                    category_id,
-                    category_path,
-                )
-                print(f"[Return immediately] Paper has been added,BibTeX Getting in the background...")
 
             return jsonify({"success": True, "paper": registered_paper.to_dict()})
 

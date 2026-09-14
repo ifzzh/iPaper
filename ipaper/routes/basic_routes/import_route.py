@@ -42,7 +42,6 @@ from ipaper.security.paths import (
     validate_category_name,
 )
 from ipaper.tools.basic_tools.upload_paper import (
-    fetch_bibtex_from_dblp,
     fetch_paper_by_arxiv_id_fast,
     search_arxiv_by_title_and_author_fast,
 )
@@ -93,8 +92,6 @@ def _extract_arxiv_id_from_url(url: str) -> Optional[str]:
         match = re.search(pattern, url, re.IGNORECASE)
         if match:
             arxiv_id = match.group(1)
-            if "v" in arxiv_id:
-                arxiv_id = arxiv_id.split("v")[0]
             return arxiv_id
     return None
 
@@ -436,10 +433,10 @@ def register_import_routes(
             raise DocumentWorkerRejected(str(state.get("error") or "document_job_failed"), 422)
         return document_client.result_json(task_id) if kind in {"pdf_inspect", "zotero_rdf"} else {}
 
-    def _promote_validated_pdf(data: bytes, category_id: str, filename: str) -> str:
+    def _promote_validated_pdf(data: bytes, category_id: str, filename: str) -> tuple[str, dict]:
         validation_id = str(uuid.uuid4())
         try:
-            _run_document_job(
+            inspection = _run_document_job(
                 validation_id,
                 "pdf_inspect",
                 io.BytesIO(data),
@@ -459,7 +456,7 @@ def register_import_routes(
                 bounded_copy(reader, temporary, document_client.limits.max_pdf_bytes)
             os.chmod(temporary, 0o660)
             os.replace(temporary, target)
-            return str(target)
+            return str(target), inspection
         finally:
             try:
                 document_client.cleanup(validation_id)
@@ -486,37 +483,6 @@ def register_import_routes(
         if paper_id not in paper_ids:
             paper_ids.append(paper_id)
             _save_reading_list(paper_ids)
-
-    def _check_duplicate_in_folder(folder_path: str, title: str) -> bool:
-        """Check if a paper with the same name already exists in the folder"""
-        if not os.path.exists(folder_path):
-            return False
-
-        clean_title = _clean_filename(title)
-        if not clean_title:
-            return False
-
-        # Check if there is a name with the same name PDF or JSON
-        expected_pdf = f"{clean_title}.pdf"
-        expected_json = f"{clean_title}.json"
-
-        for filename in os.listdir(folder_path):
-            if filename.lower() == expected_pdf.lower():
-                return True
-            # Also check JSON title in file
-            if filename.endswith(".json"):
-                try:
-                    json_path = os.path.join(folder_path, filename)
-                    with open(json_path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                        if (
-                            data.get("title", "").strip().lower()
-                            == title.strip().lower()
-                        ):
-                            return True
-                except Exception:
-                    pass
-        return False
 
     def _check_paper_already_imported(paper_data: Dict[str, Any]) -> bool:
         """Check if the paper has been imported (via arXiv ID or title)"""
@@ -728,12 +694,8 @@ def register_import_routes(
                         search_title = f"{title} {authors}" if authors else title
                         print(f"[Import] Search using titles arXiv: {search_title[:50]}...")
 
-                        # Extract the first author
-                        first_author = authors.split(",")[0].strip() if authors else ""
-                        if first_author:
-                            paper_info = search_arxiv_by_title_and_author_fast(
-                                title, first_author
-                            )
+                        if authors:
+                            paper_info = search_arxiv_by_title_and_author_fast(title, authors)
 
                         if paper_info:
                             arxiv_id = paper_info.get("arxiv_id")
@@ -746,16 +708,7 @@ def register_import_routes(
                     skipped_count += 1
                     continue
 
-                # Check whether the target directory already has a paper with the same name (duplicate detection)
-                category_folder = create_category_folder(category_id)
-                paper_title = paper_info.get("title", "")
-                if paper_title and _check_duplicate_in_folder(
-                    category_folder, paper_title
-                ):
-                    print(f"[Import] Skip duplicate papers: {paper_title[:50]}")
-                    duplicate_count += 1
-                    continue
-
+                # Preserve different files and versions, even with identical titles.
                 # download PDF
                 pdf_result = _download_arxiv_pdf(arxiv_id)
                 if not pdf_result:
@@ -769,7 +722,7 @@ def register_import_routes(
                 clean_title = _clean_filename(paper_info.get("title"))
                 if clean_title:
                     pdf_filename = f"{clean_title}.pdf"
-                file_path = _promote_validated_pdf(pdf_content, category_id, pdf_filename)
+                file_path, inspection = _promote_validated_pdf(pdf_content, category_id, pdf_filename)
                 pdf_filename = os.path.basename(file_path)
 
                 # create Paper object
@@ -800,13 +753,13 @@ def register_import_routes(
                     upload_source="zotero_import",
                 )
 
-                # Register to paper_store
+                new_paper.extra.update(_metadata_inspection=inspection, category_id=category_id)
+                save_paper_metadata(file_path, new_paper)
+                # Publish only after the paper and metadata task commit.
                 registered_paper = paper_store.upsert(
                     new_paper, category_id=category_id, category_path=full_category_path
                 )
 
-                # Save metadata
-                save_paper_metadata(file_path, registered_paper)
 
                 # Note: Imported papers are not added to the to-read list
 
@@ -815,18 +768,7 @@ def register_import_routes(
                     others_count += 1
                 print(f"[Import] ✅ Imported successfully: {paper_info.get('title', '')[:50]}")
 
-                # Background acquisition DBLP BibTeX(asynchronous)
-                if paper_info.get("title") and paper_info.get("authors"):
-                    _import_workers.submit(
-                        _fetch_dblp_bibtex_async,
-                        paper_id,
-                        paper_info["title"],
-                        paper_info["authors"],
-                        arxiv_id,
-                        file_path,
-                        category_id,
-                        full_category_path,
-                    )
+                # Bibliographic follow-up is persisted by PaperDAO admission.
 
             except Exception as e:
                 print(f"[Import] ❌ Failed to import paper: {e}")
@@ -856,30 +798,6 @@ def register_import_routes(
         print(
             f"[Import] Import completed: success {success_count}, fail {failed_count}, jump over {skipped_count}, repeat {duplicate_count}, Others {others_count}"
         )
-
-    def _fetch_dblp_bibtex_async(
-        paper_id: str,
-        title: str,
-        authors: str,
-        arxiv_id: str,
-        file_path: str,
-        category_id: str,
-        category_path: List[str],
-    ):
-        """Asynchronous acquisition DBLP BibTeX"""
-        try:
-            bibtex = fetch_bibtex_from_dblp(title, authors, arxiv_id)
-            if bibtex:
-                paper = paper_store.get(paper_id)
-                if paper:
-                    paper.bibtex = bibtex
-                    paper_store.upsert(
-                        paper, category_id=category_id, category_path=category_path
-                    )
-                    save_paper_metadata(file_path, paper)
-                    print(f"[Import DBLP] ✅ BibTeX updated: {paper_id}")
-        except Exception as e:
-            print(f"[Import DBLP] ❌ get BibTeX fail: {e}")
 
     def _enqueue_import(function, task_id, *args):
         global current_import_task_id
@@ -1390,9 +1308,6 @@ def register_import_routes(
                             failed_count += 1
                             continue
                         category_path = ["root"] + category_path_parts
-                    if _check_duplicate_in_folder(create_category_folder(category_id), title):
-                        duplicate_count += 1
-                        continue
 
                     pdf_content = None
                     pdf_filename = None
@@ -1414,7 +1329,7 @@ def register_import_routes(
                     clean_title = _clean_filename(title)
                     if clean_title:
                         pdf_filename = f"{clean_title}.pdf"
-                    pdf_path = _promote_validated_pdf(pdf_content, category_id, pdf_filename)
+                    pdf_path, inspection = _promote_validated_pdf(pdf_content, category_id, pdf_filename)
                     actual_filename = os.path.basename(pdf_path)
                     paper_id = str(paper_meta.get("id") or uuid.uuid4())
                     new_paper = Paper(
@@ -1446,10 +1361,11 @@ def register_import_routes(
                         analysis_time=paper_meta.get("analysis_time", 0),
                     )
 
+                    new_paper.extra.update(_metadata_inspection=inspection, category_id=category_id)
+                    save_paper_metadata(pdf_path, new_paper)
                     registered = paper_store.upsert(
                         new_paper, category_id=category_id, category_path=category_path
                     )
-                    save_paper_metadata(pdf_path, registered)
 
                     success_count += 1
                     print(f"[Import] ✅ Imported successfully: {title[:50]}")
@@ -1729,15 +1645,15 @@ def register_import_routes(
                         analysis_view_time=paper_metadata.get("analysis_view_time", 0),
                     )
 
-                    # Register to paper_store
+                    new_paper.extra["category_id"] = category_id
+                    save_paper_metadata(dest_pdf_path, new_paper)
+                    # Publish after commit.
                     registered_paper = paper_store.upsert(
                         new_paper,
                         category_id=category_id,
                         category_path=full_category_path,
                     )
 
-                    # Save metadata
-                    save_paper_metadata(dest_pdf_path, registered_paper)
 
                     success_count += 1
                     print(

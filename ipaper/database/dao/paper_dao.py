@@ -28,6 +28,7 @@ class PaperDAO:
     def _dict_to_row(paper_dict):
         row = {}
         metadata = paper_dict.copy()
+        metadata.pop("_metadata_inspection", None)
         
         for field, col in PaperDAO.COLUMN_MAP.items():
             val = metadata.pop(field, None)
@@ -67,28 +68,56 @@ class PaperDAO:
 
     @staticmethod
     def save_paper(paper_data):
+        from ipaper.metadata.store import prepare_save, after_save, in_library
+        db = get_db()
+        owner = current_user_id()
         try:
-            db = get_db()
-            row = PaperDAO._dict_to_row(paper_data)
-            row['owner_id'] = current_user_id()
-            
-            cols = list(row.keys())
-            placeholders = ', '.join(['?'] * len(cols))
-            assignments = ", ".join(
-                f"{column}=excluded.{column}" for column in cols if column != "id"
-            )
-            sql = (
-                f'INSERT INTO papers ({", ".join(cols)}) VALUES ({placeholders}) '
-                f'ON CONFLICT(id) DO UPDATE SET {assignments} '
-                'WHERE papers.owner_id=excluded.owner_id'
-            )
-            cursor = db.execute(sql, list(row.values()))
-            if cursor.rowcount != 1:
-                db.rollback()
+            db.execute("BEGIN IMMEDIATE")
+            previous = db.execute('SELECT * FROM papers WHERE id=?', (paper_data['id'],)).fetchone()
+            if previous and previous['owner_id'] != owner:
                 raise PermissionError("paper_not_found")
+            incoming = prepare_save(db, owner, paper_data, previous)
+            row = PaperDAO._dict_to_row(incoming)
+            row['owner_id'] = owner
+            cols = list(row)
+            assignments = ', '.join(f'{col}=excluded.{col}' for col in cols if col != 'id')
+            db.execute(f'INSERT INTO papers ({", ".join(cols)}) VALUES ({", ".join("?" for _ in cols)}) '
+                       f'ON CONFLICT(id) DO UPDATE SET {assignments} WHERE papers.owner_id=excluded.owner_id', list(row.values()))
+            entering = not previous or (not in_library(PaperDAO._row_to_dict(previous)) and in_library(incoming))
+            after_save(db, owner, incoming, new=entering)
             db.commit()
-        except Exception as e:
-            print(f"Error saving paper {paper_data.get('id')}: {e}")
+            return PaperDAO.get_paper(paper_data['id'])
+        except BaseException:
+            db.rollback()
+            raise
+
+    @staticmethod
+    def patch_state(paper_id, changes, *, increments=None):
+        """Mutate only requested runtime fields under the database write lock."""
+        from ipaper.metadata.model import LEGACY
+        if set(changes) & set(LEGACY.values()):
+            raise ValueError("use_metadata_edit")
+        increments = increments or {}
+        if set(increments) - {'read_time', 'analysis_view_time'}:
+            raise ValueError("invalid_duration_field")
+        db = get_db()
+        owner = current_user_id()
+        try:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT * FROM papers WHERE id=? AND owner_id=?', (paper_id, owner)).fetchone()
+            if not row:
+                raise PermissionError('paper_not_found')
+            data = PaperDAO._row_to_dict(row)
+            data.update(changes)
+            for key, amount in increments.items():
+                data[key] = int(data.get(key) or 0) + int(amount)
+            values = PaperDAO._dict_to_row(data)
+            db.execute('UPDATE papers SET '+','.join(k+'=?' for k in values if k!='id')+' WHERE id=? AND owner_id=?',
+                       [v for k,v in values.items() if k!='id']+[paper_id,owner])
+            db.commit()
+            return PaperDAO.get_paper(paper_id)
+        except BaseException:
+            db.rollback()
             raise
 
     @staticmethod
@@ -141,6 +170,13 @@ class PaperDAO:
         # files remain under the backup-aware bounded artifact cleanup.
         if db.execute("SELECT 1 FROM sqlite_master WHERE name='reading_bookmarks'").fetchone():
             db.execute('DELETE FROM reading_bookmarks WHERE paper_id=? AND owner_id=?', (paper_id,owner))
+        from ipaper.metadata.store import exists
+        if exists(db):
+            db.execute("UPDATE metadata_items SET status='deleted',stage='deleted' WHERE owner_id=? AND paper_id=? AND status IN ('queued','running','waiting')", (owner,paper_id))
+            for table in ('bibliography','bibliography_revisions','bibliography_inspections','bibliography_candidates'):
+                db.execute(f'DELETE FROM {table} WHERE owner_id=? AND paper_id=?',(owner,paper_id))
+            db.execute('DELETE FROM metadata_duplicate_dismissals WHERE owner_id=? AND (paper_id=? OR other_id=?)',(owner,paper_id,paper_id))
+            db.execute('INSERT OR REPLACE INTO metadata_index_events(owner_id,paper_id,revision) VALUES (?,?,0)',(owner,paper_id))
         db.execute('DELETE FROM papers WHERE id=? AND owner_id=?', (paper_id, owner))
         db.commit()
 

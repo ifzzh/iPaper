@@ -195,6 +195,11 @@ def _sensitive_rate_policy():
         return "reading_bookmarks", 120, 60
     if request.endpoint in {"processing.create", "processing.selection_create"} and request.method == "POST":
         return "processing", 30, 3600
+    if request.endpoint and request.endpoint.startswith("metadata."):
+        if request.method in {"POST","PATCH"}:
+            return "bibliography", 120, 3600
+        if request.endpoint == "metadata.citation":
+            return "bibliography_export", 120, 60
     if path in {
         "/api/paper/analyze",
         "/api/paper/translate",
@@ -1026,9 +1031,14 @@ def register_routes():
         AGENTIC_CREDENTIAL_STORE, OUTBOUND_POLICY,
     )
     register_processing_routes(app, processing_service)
+    from ipaper.metadata.service import MetadataService
+    from ipaper.metadata.routes import register_metadata_routes
+    metadata_service = MetadataService(DB_PATH, processing_service, paper_store, search_index)
+    register_metadata_routes(app, metadata_service)
     processing_service.initialize_ifzzh()
     if app.config.get("IPAPER_START_BACKGROUND_TASKS", False):
         processing_service.start()
+        metadata_service.start()
 
     register_settings_routes(
         app,
@@ -1288,6 +1298,9 @@ def _initialize_application(papers_dir: str) -> None:
 
     # Paper data is now directly stored in the JSON file next to the PDF file
 def shutdown_application() -> None:
+    metadata_service = app.extensions.get("metadata")
+    if metadata_service:
+        metadata_service.shutdown()
     processing_service = app.extensions.get("processing")
     if processing_service:
         processing_service.shutdown()

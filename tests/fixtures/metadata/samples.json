@@ -1,0 +1,953 @@
+[
+  {
+    "name": "doi_exact",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable Systems",
+      "doi": "10.9999/a"
+    },
+    "header": "Reliable Systems",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ],
+          "doi": "10.9999/a"
+        }
+      }
+    ],
+    "expected": [
+      "verified"
+    ]
+  },
+  {
+    "name": "doi_reference",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Our New Paper"
+    },
+    "header": "Our New Paper\nAuthor\nReferences\n10.9999/a",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ],
+          "doi": "10.9999/a"
+        }
+      }
+    ],
+    "expected": [
+      "candidate"
+    ]
+  },
+  {
+    "name": "doi_wrong_embedded",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Wrong internal title",
+      "doi": "10.9999/a"
+    },
+    "header": "Reliable Systems\nAda Example",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ],
+          "doi": "10.9999/a"
+        }
+      }
+    ],
+    "expected": [
+      "verified"
+    ]
+  },
+  {
+    "name": "doi_no_title_support",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Wrong paper",
+      "doi": "10.9999/a"
+    },
+    "header": "Different text",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ],
+          "doi": "10.9999/a"
+        }
+      }
+    ],
+    "expected": [
+      "candidate"
+    ]
+  },
+  {
+    "name": "same_title_wrong_author",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable Systems",
+      "authors": "Cat Example"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      "candidate"
+    ]
+  },
+  {
+    "name": "same_title_supported_authors",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable Systems",
+      "authors": "Ada Example; Bo Example"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      "verified"
+    ]
+  },
+  {
+    "name": "same_title_wrong_year",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable Systems",
+      "authors": "Ada Example; Bo Example",
+      "year": "2025"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ],
+          "year": "2026"
+        }
+      }
+    ],
+    "expected": [
+      "related_version"
+    ]
+  },
+  {
+    "name": "single_author",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable Systems",
+      "authors": "Ada Example"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      "verified"
+    ]
+  },
+  {
+    "name": "two_of_many_authors",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable Systems",
+      "authors": "Ada Example; Bo Example"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            },
+            {
+              "name": "Cy Example",
+              "kind": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      "verified"
+    ]
+  },
+  {
+    "name": "only_one_of_many",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable Systems",
+      "authors": "Ada Example"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      "candidate"
+    ]
+  },
+  {
+    "name": "chinese_identity",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "可靠计算系统的研究",
+      "authors": "王一; 李二"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "可靠计算系统的研究",
+          "author_list": [
+            {
+              "name": "王一",
+              "kind": "person"
+            },
+            {
+              "name": "李二",
+              "kind": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      "verified"
+    ]
+  },
+  {
+    "name": "chinese_homonym",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "可靠计算系统的研究",
+      "authors": "张三"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "可靠计算系统的研究",
+          "author_list": [
+            {
+              "name": "王一",
+              "kind": "person"
+            },
+            {
+              "name": "李二",
+              "kind": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      "candidate"
+    ]
+  },
+  {
+    "name": "corporate_author",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable Systems",
+      "authors": "Systems Research Group"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Systems Research Group",
+              "kind": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      "verified"
+    ]
+  },
+  {
+    "name": "initials_not_guessed",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable Systems",
+      "authors": "A. Example"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      "candidate"
+    ]
+  },
+  {
+    "name": "header_authors",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable Systems"
+    },
+    "header": "Reliable Systems\nAda Example\nBo Example",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      "verified"
+    ]
+  },
+  {
+    "name": "reference_authors_only",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable Systems"
+    },
+    "header": "Reliable Systems\nReferences\nAda Example\nBo Example",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      "candidate"
+    ]
+  },
+  {
+    "name": "scan_no_text",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "scan_001"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      "candidate"
+    ]
+  },
+  {
+    "name": "embedded_garbage",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Microsoft Word document"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      "candidate"
+    ]
+  },
+  {
+    "name": "wrong_title_same_author",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "A Different Method",
+      "authors": "Ada Example; Bo Example"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      "candidate"
+    ]
+  },
+  {
+    "name": "full_title_linebreak",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable\n Systems",
+      "authors": "Ada Example; Bo Example"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      "verified"
+    ]
+  },
+  {
+    "name": "identifier_without_text",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "doi": "10.9999/a"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ],
+          "doi": "10.9999/a"
+        }
+      }
+    ],
+    "expected": [
+      "candidate"
+    ]
+  },
+  {
+    "name": "arxiv_exact_v1",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable Systems",
+      "arxiv_id": "2401.00001",
+      "arxiv_version": "1"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ],
+          "arxiv_id": "2401.00001",
+          "arxiv_version": "1"
+        }
+      }
+    ],
+    "expected": [
+      "verified"
+    ]
+  },
+  {
+    "name": "arxiv_other_version",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable Systems",
+      "arxiv_id": "2401.00001",
+      "arxiv_version": "1"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ],
+          "arxiv_id": "2401.00001",
+          "arxiv_version": "2"
+        }
+      }
+    ],
+    "expected": [
+      "related_version"
+    ]
+  },
+  {
+    "name": "arxiv_header_version",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable Systems"
+    },
+    "header": "Reliable Systems\narXiv:2401.00001v2",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ],
+          "arxiv_id": "2401.00001",
+          "arxiv_version": "2"
+        }
+      }
+    ],
+    "expected": [
+      "verified"
+    ]
+  },
+  {
+    "name": "arxiv_title_conflict",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "A Different Method",
+      "arxiv_id": "2401.00001"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ],
+          "arxiv_id": "2401.00001"
+        }
+      }
+    ],
+    "expected": [
+      "candidate"
+    ]
+  },
+  {
+    "name": "preprint_journal_year_conflict",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable Systems",
+      "year": "2024",
+      "authors": "Ada Example; Bo Example"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ],
+          "year": "2025",
+          "venue_type": "journal"
+        }
+      }
+    ],
+    "expected": [
+      "related_version"
+    ]
+  },
+  {
+    "name": "two_competing_records",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable Systems",
+      "authors": "Ada Example; Bo Example"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ],
+          "doi": "10.9999/other"
+        }
+      }
+    ],
+    "expected": [
+      "verified"
+    ]
+  },
+  {
+    "name": "missing_metadata",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {},
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      "candidate"
+    ]
+  },
+  {
+    "name": "long_filename",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "2026_Final_Proof_print"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": [
+            {
+              "name": "Ada Example",
+              "kind": "person"
+            },
+            {
+              "name": "Bo Example",
+              "kind": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      "candidate"
+    ]
+  },
+  {
+    "name": "openreview_title_only",
+    "evidence": "Synthetic header and explicitly supplied bibliographic records; no live provider claim",
+    "fields": {
+      "title": "Reliable Systems"
+    },
+    "header": "",
+    "records": [
+      {
+        "provider": "crossref",
+        "url": "https://doi.org/10.9999/synthetic",
+        "externalId": "synthetic",
+        "fields": {
+          "title": "Reliable Systems",
+          "author_list": []
+        }
+      }
+    ],
+    "expected": [
+      "candidate"
+    ]
+  }
+]

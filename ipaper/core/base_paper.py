@@ -148,7 +148,7 @@ class Paper:
                 continue
             data[f.name] = copy.deepcopy(getattr(self, f.name))
         # Extra keys should not override core attributes.
-        merged = {**self.extra, **data}
+        merged = {**{k:v for k,v in self.extra.items() if not k.startswith("_metadata_")}, **data}
         return merged
 
     # ------------------------------------------------------------------

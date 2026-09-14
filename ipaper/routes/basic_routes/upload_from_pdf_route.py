@@ -135,10 +135,12 @@ def register_upload_from_pdf_routes(
                 "notes": "",
                 "starred": False,
             })
+            paper.extra["_metadata_inspection"] = result
+            paper.extra["category_id"] = category_id
+            save_paper_metadata(str(target), paper)
             registered = paper_store.upsert(
                 paper, category_id=category_id, category_path=category_path
             )
-            save_paper_metadata(str(target), registered)
             _add_to_reading_list(registered.id)
             DocumentJobDAO.update(task_id, "completed", progress=100, paper_id=registered.id)
             document_client.cleanup(task_id)
