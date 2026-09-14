@@ -78,11 +78,17 @@ def record_analysis_response(response, path, *, live):
     return response
 
 
-def run_acceptance(root, sample, config, *, live=False):
+def run_acceptance(root, sample, config, *, live=False, replay_overview=None):
     if live:
         live_preflight()
     import app as application_module
     from ipaper.processing import understanding as analysis, understanding_chat as chat
+
+    replay = None
+    if replay_overview:
+        from tests.understanding_replay_support import OverviewReplay
+
+        replay = OverviewReplay(replay_overview, config)
 
     root, sample = Path(root).resolve(), Path(sample).resolve()
     if root.exists():
@@ -108,11 +114,17 @@ def run_acceptance(root, sample, config, *, live=False):
     receipt.update(
         live=live,
         createdAt=time.time(),
-        requests={"overview": 6, "interpretation": 5, "local": 1, "paper": 2},
-        inputBudget=345000,
-        outputBudget=36864,
+        requests={
+            "overview": 1 if replay else 6,
+            "interpretation": 5,
+            "local": 1,
+            "paper": 2,
+        },
+        inputBudget=185000 if replay else 345000,
+        outputBudget=26624 if replay else 36864,
         timeoutSeconds=120,
         automaticRetry=False,
+        reusedOverviewResponses=5 if replay else 0,
     )
     (root / "request-receipt.json").write_text(encoded(receipt))
     (root / "request-receipt.json").chmod(0o600)
@@ -133,7 +145,7 @@ def run_acceptance(root, sample, config, *, live=False):
             phase, {"requests": 0, "inputTokensUpper": 0, "outputTokensUpper": 0}
         )
         cost = len(encoded(messages).encode()) + 1024
-        bound = limits[phase]
+        bound = (1, 30000, 4096) if replay and phase == "overview" else limits[phase]
         if (
             current["requests"] + 1 > bound[0]
             or current["inputTokensUpper"] + cost > bound[1]
@@ -282,7 +294,20 @@ def run_acceptance(root, sample, config, *, live=False):
         raw_stream = chat.stream_request
 
         def guarded_analysis(profile, messages, output):
+            if replay and phase == "overview" and replay.index < 5:
+                response, provenance = replay.take(messages, output)
+                path = root / f"reused-response-{replay.index}.json"
+                path.write_text(
+                    encoded({"response": response, "provenance": provenance})
+                )
+                path.chmod(0o600)
+                return response
             charge(messages, output)
+            request_path = root / f'request-{usage["requests"]}.json'
+            request_path.write_text(
+                encoded({"messages": messages, "outputLimit": output, "phase": phase})
+            )
+            request_path.chmod(0o600)
             response = raw_analysis(profile, messages, output)
             path = root / f'response-{usage["requests"]}.json'
             response = record_analysis_response(response, path, live=live)
@@ -444,6 +469,7 @@ def run_acceptance(root, sample, config, *, live=False):
                 "turns": turns,
                 "usage": usage,
                 "mineruRequests": 0,
+                "reusedOverviewResponses": replay.index if replay else 0,
             }
             (root / "result.json").write_text(encoded(result))
             return result
@@ -461,12 +487,19 @@ def main():
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--sample", required=True)
     parser.add_argument("--root", required=True)
+    parser.add_argument("--replay-overview")
     args = parser.parse_args()
     if args.live:
         raw = sys.stdin.buffer.read(32769)
         if len(raw) > 32768:
             raise ValueError("configuration_size_limit")
-        result = run_acceptance(args.root, args.sample, json.loads(raw), live=True)
+        result = run_acceptance(
+            args.root,
+            args.sample,
+            json.loads(raw),
+            live=True,
+            replay_overview=args.replay_overview,
+        )
     else:
         with fake_openai() as origin:
             bundle = json.loads((Path(args.sample) / "sample.json").read_text())

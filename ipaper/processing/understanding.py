@@ -11,6 +11,7 @@ from .translation import process_request, generation_options, _MODEL_SLOTS
 
 KINDS = {"overview", "interpretation", "analysis_export"}
 PROMPT_VERSION = 2
+EVIDENCE_VERSION = 2
 NOTE_BYTES = 4000
 REDUCTION_FAN_IN = 5
 SECTIONS = [
@@ -63,6 +64,33 @@ def reduction_count(count):
         count = math.ceil(count / REDUCTION_FAN_IN)
         total += count
     return total
+
+
+def literal_evidence_excerpt(text, quote):
+    """Return original text, never a fuzzy or model-written source excerpt.
+
+    Explicit ellipses may abridge a quotation. Recover them only when every
+    substantive fragment occurs exactly once, in order, within this one unit.
+    The returned span includes the actual omitted words and remains bounded.
+    """
+    if not isinstance(quote, str) or not quote.strip() or len(quote) > 1000:
+        return None
+    if quote in text:
+        return quote
+    parts = [p.strip() for p in re.split(r"\.{3,}|…", quote) if p.strip()]
+    if not 1 <= len(parts) <= 8 or not re.search(r"\.{3,}|…", quote):
+        return None
+    start, end = None, 0
+    for part in parts:
+        if len(part) < 16 or text.count(part) != 1:
+            return None
+        offset = text.index(part)
+        if offset < end:
+            return None
+        if start is None:
+            start = offset
+        end = offset + len(part)
+    return text[start:end] if end - start <= 1000 else None
 
 
 class Understanding:
@@ -148,6 +176,7 @@ class Understanding:
             "credentialRevision": row[0] if row else None,
             "generationOptions": generation_options(profile["model"]),
             "promptVersion": PROMPT_VERSION,
+            "evidenceVersion": EVIDENCE_VERSION,
         }
 
     def rows(self, paper_id):
@@ -185,6 +214,7 @@ class Understanding:
         profile = self.pipeline.settings().get("llmConfigs", {}).get("interpret", {})
         config_changed = (
             config.get("promptVersion") != PROMPT_VERSION
+            or config.get("evidenceVersion") != EVIDENCE_VERSION
             or settings["prompt"] != config.get("prompt")
             or settings["language"]
             != config.get("configuredLanguage", config.get("language"))
@@ -642,13 +672,10 @@ class Understanding:
             if not isinstance(item, dict):
                 continue
             label, quote = item.get("label"), item.get("quote")
-            if (
-                not isinstance(label, str)
-                or label not in allowed
-                or not isinstance(quote, str)
-                or not quote.strip()
-                or quote not in allowed[label]["text"]
-            ):
+            if not isinstance(label, str) or label not in allowed:
+                continue
+            quote = literal_evidence_excerpt(allowed[label]["text"], quote)
+            if quote is None:
                 continue
             mapping[label] = {
                 "sourceId": self.files.evidence(snapshot_id, allowed[label]["id"]),

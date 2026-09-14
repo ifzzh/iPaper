@@ -12,6 +12,23 @@ from tests.test_workbench import login
 from ipaper.processing.common import ProcessingError
 
 
+def test_abridged_quotes_resolve_only_to_unambiguous_literal_source():
+    from ipaper.processing.understanding import literal_evidence_excerpt as excerpt
+
+    first = "The controlled experiment used four GPUs."
+    last = "The measured improvement was 27 percent."
+    text = first + " Full omitted source wording. " + last
+    assert excerpt(text, first) == first
+    assert excerpt(text, first + "...") == first.rstrip(".")
+    assert excerpt(text, first + " … " + last) == text
+    assert excerpt(text, last + "..." + first) is None
+    assert excerpt(text, first + "...a fabricated ending") is None
+    assert excerpt(text + first, first + "..." + last) is None
+    assert excerpt(text, "four GPUs..." + last) is None
+    assert excerpt(text, first.lower() + "..." + last) is None
+    assert excerpt(first + "x" * 1100 + last, first + "..." + last) is None
+
+
 @pytest.fixture
 def understanding_app(application, monkeypatch):
     calls = []
