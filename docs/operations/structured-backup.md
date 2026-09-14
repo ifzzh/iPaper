@@ -99,12 +99,14 @@ sudo -n python3 /mnt/raid1/backups/ipaper/releases/1.4.0-20260914T054147Z/rollba
 
 初次历史回填仅限重新确认的已入库名单，不包含未入库 Daily 发现记录。任务清单、分类结果和资产哈希比较保存在私有交付记录；不把带真实论文的数据库、截图或首页文本上传到 Release。
 
-本次停写发布备份为 `/mnt/raid1/backups/ipaper/releases/1.5.0-20260914T083001Z`；包含 786 个原有文件、143 个不可变产物、SQLite 和受限配置。回填终态后的日常备份 `/mnt/raid1/backups/ipaper/database/20260914T090034Z` 已验证包含书目、字段修订与补全检查点。真实 Web 重启确认完成项没有重新查询；三个服务保持原数据挂载及 external `deploy_document_jobs` 卷。
+每次部署应在受限运维记录中保存实际发布备份目录与最后一次日常快照，不能把前一版本目录作为本次回退基线。先检查备份中的 `rollback.json`、配置校验值、不可变产物清单和已缓存的旧镜像。具体路径仅记录在本地交付说明。
 
 ```bash
+# 将 IPAPER_RELEASE_BACKUP 指向本次已核验的受限发布备份目录。
 sudo -n env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
-  python3 /mnt/raid1/backups/ipaper/releases/1.5.0-20260914T083001Z/rollback.py \
-  --backup /mnt/raid1/backups/ipaper/releases/1.5.0-20260914T083001Z
+  python3 "$IPAPER_RELEASE_BACKUP/rollback.py" --backup "$IPAPER_RELEASE_BACKUP"
 ```
 
-以上为本次已实测的 dry-run；实际回退追加 `--apply`，恢复 Web 1.4.0、原配置及 Web latest，继续使用当前数据库，保留新表、新结果和用户在升级后产生的数据。发布早期 Registry 直连通过，最终渠道更新遇到 DNS 地址不一致及 EOF。备份内的 `registry-latest.py` 已保存备用路径：经本机 7890 代理查询 HTTPS DNS，仅对本次 Registry 连接使用公网地址，继续校验原域名 TLS，未修改系统 DNS 或正式配置。回退脚本校验该工具哈希，在常规 Registry 通道失败时调用；仅允许本次 1.4.0／1.5.0 摘要，凭据只经本机 helper、内存和受控标准输入使用。不能换用前一版本备份目录的回退基线。
+上面是 dry-run；核对目标后，实际回退追加 `--apply`。恢复本次部署前镜像、配置和 Web latest，继续使用当前数据库，保留新表、新结果和升级后的用户数据。
+
+若 Registry 的系统解析路径失败，本次受限运维工具支持单进程 HTTPS DNS 备用通道：只连接公开 Registry，仍验证原域名 TLS，不修改系统 DNS、正式代理配置或版本标签。回退调用前核对工具哈希；凭据只使用本机 helper、内存和受控标准输入，不写入备份。受限工具只适用于其明确记录的新旧版本组合。
