@@ -49,6 +49,19 @@ if __name__ == "__main__":
         patch.setattr(app_module, "DB_PATH", connection.DB_PATH)
         set_background_identity(Identity(first["id"], first["username"], first["role"]))
         install_reader_fixture(application, directory, (first, second, third), patch, origin, register_routes=False)
+        # Library pagination now queries admitted database rows, not a virtual
+        # in-memory-only list. Back the remaining synthetic rows with real PDFs;
+        # preserve the first six reader fixtures (encrypted/missing/translated).
+        def admit_library_fixture():
+            from ipaper.security.paths import paper_path
+            for i in range(6,1000):
+                paper=app_module.paper_store.get(f'a-{i}')
+                target=paper_path(Path(directory)/'papers','root',f'a-{i}.pdf',create_parent=True)
+                shutil.copyfile(Path(__file__).parent/'fixtures/workbench/translated.pdf',target)
+                paper.filename=target.name;paper.file_path=str(target)
+                PaperDAO.save_paper(paper.to_dict())
+                app_module.paper_store.upsert(paper,category_id='root',category_path=['Root'])
+        run_as_identity(Identity(first['id'],first['username'],first['role']),admit_library_fixture)
         with application.app_context():
             def seed_translation_history():
                 job_id='00000000-0000-4000-8000-000000000112'
@@ -118,6 +131,9 @@ if __name__ == "__main__":
         if os.getenv("IPAPER_BROWSER_METADATA") == "1":
             from tests.metadata_support import install as install_metadata
             install_metadata(application)
+        if os.getenv('IPAPER_BROWSER_KEYWORDS')=='1':
+            from tests.keywords_support import install as install_keywords
+            install_keywords(application)
         server = make_server("127.0.0.2", 7191, application, threaded=True)
         print("Synthetic unified application ready", flush=True)
         try:

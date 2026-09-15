@@ -1,4 +1,15 @@
-import { MetadataDetails, MetadataEditor, MetadataBatchDialog } from "./Metadata";
+import {
+  TagChips,
+  PaperKeywords,
+  TagManager,
+  KeywordBatchDialog,
+  type Tag,
+} from "./Keywords";
+import {
+  MetadataDetails,
+  MetadataEditor,
+  MetadataBatchDialog,
+} from "./Metadata";
 import { TranslationDialog } from "./Processing";
 import { ResizeHandle } from "./ResizeHandle";
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -23,6 +34,8 @@ import {
   FolderInput,
   Download,
   Check,
+  Tags,
+  X,
   ArrowUpRight,
 } from "lucide-react";
 import { type Paper, paperFrom, errorText } from "./api";
@@ -131,42 +144,102 @@ export function Library({
     [category, setCategory] = useState<Category | null>(null),
     [checked, setChecked] = useState<string[]>([]),
     [metadataRevision, setMetadataRevision] = useState(0),
-    [metadataSelection, setMetadataSelection] = useState<Record<string,unknown>|null>(null);
-  const reading = useResource<any[]>("/api/reading-list", []),
-    subset = useResource<any[]>(
-      !["all", "favorites", "reading"].includes(filter)
-        ? "/api/papers/" + encodeURIComponent(filter) + "/recursive"
-        : null,
-      [],
-    );
-  const paper = items.find((p) => p.id === selected),
-    readIds = new Set(reading.data.map((p) => p.id));
-  const visible = useMemo(() => {
-    let list = items.filter((p) =>
-      filter === "favorites"
-        ? p.starred
-        : filter === "reading"
-          ? readIds.has(p.id)
-          : filter === "all"
-            ? true
-            : subset.data.some((x) => x.id === p.id),
-    );
-    if (query.trim())
-      list = list.filter((p) =>
-        (p.title + " " + p.authors + " " + p.abstract + " " + p.year + " " + p.journal)
-          .toLowerCase()
-          .includes(query.toLowerCase()),
+    [metadataSelection, setMetadataSelection] = useState<Record<
+      string,
+      unknown
+    > | null>(null);
+  const [tagIds, setTagIds] = useState<string[]>([]),
+    [tagMode, setTagMode] = useState("all"),
+    [keywordSelection, setKeywordSelection] = useState<Record<
+      string,
+      unknown
+    > | null>(null),
+    [selectionId, setSelectionId] = useState("");
+  const catalog = useResource<{
+    tags: Tag[];
+    redirects?: Record<string, string | null>;
+  }>("/api/tags", { tags: [] });
+  useEffect(() => {
+    const aliases = catalog.data.redirects || {};
+    setTagIds((previous) => {
+      const next = Array.from(
+        new Set(
+          previous.flatMap((id) =>
+            id in aliases ? (aliases[id] ? [aliases[id]!] : []) : [id],
+          ),
+        ),
       );
-    if (order === "title")
-      list = [...list].sort((a, b) => a.title.localeCompare(b.title));
-    if (order === "year")
-      list = [...list].sort((a, b) => b.year.localeCompare(a.year));
-    return list;
-  }, [items, filter, query, order, reading.data, subset.data]);
+      return next.join() === previous.join() ? previous : next;
+    });
+  }, [catalog.data]);
+  const reading = useResource<any[]>("/api/reading-list", []);
+  const categoryIds = useMemo(() => {
+    const find = (node: Category): Category | undefined =>
+      node.id === filter ? node : (node.children || []).map(find).find(Boolean);
+    const node = find(tree);
+    return node ? flattenCategories(node).map((x) => x.category.id) : [filter];
+  }, [tree, filter]);
+  const criteria = useMemo(
+    () => ({
+      scope: ["all", "favorites", "reading"].includes(filter)
+        ? filter
+        : "categories",
+      query,
+      categoryIds,
+      tagIds,
+      tagMode,
+      order,
+    }),
+    [filter, query, categoryIds, tagIds, tagMode, order],
+  );
+  const list = useResource<any>(
+    "/api/library/papers?filter=" +
+      encodeURIComponent(JSON.stringify(criteria)) +
+      "&page=" +
+      page,
+    { items: [], total: 0 },
+  );
+  const visible: Paper[] = list.data.items.map(paperFrom),
+    total: number = list.data.total;
+  const paper =
+      items.find((p) => p.id === selected) ||
+      visible.find((p) => p.id === selected),
+    readIds = new Set(reading.data.map((p) => p.id));
+  function changedKeywords() {
+    list.refresh();
+    catalog.refresh();
+  }
+  function addFilter(tag: Tag) {
+    setTagIds((v) => (v.includes(tag.id) ? v : [...v, tag.id]));
+  }
+  async function allSelection() {
+    const result = await api("/api/library/selections", "POST", {
+      selection: criteria,
+    });
+    setChecked(result.paperIds);
+    setSelectionId(result.id);
+    return result;
+  }
   useEffect(() => {
     setPage(1);
     setChecked([]);
-  }, [filter, query]);
+    setSelectionId("");
+  }, [filter, query, tagIds, tagMode, order]);
+  useEffect(() => {
+    list.refresh();
+    catalog.refresh();
+  }, [items]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      list.refresh();
+      catalog.refresh();
+    }, 5000);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    if (total > 0 && page > Math.ceil(total / 50))
+      setPage(Math.ceil(total / 50));
+  }, [total, page]);
   async function perform(fn: () => Promise<unknown>) {
     if (busy) return;
     setBusy(true);
@@ -310,6 +383,52 @@ export function Library({
             <RefreshCw size={17} />
           </button>
         </div>
+        <div className="keyword-filter-bar">
+          <Tags size={15} />
+          <select
+            aria-label="按关键词筛选"
+            value=""
+            onChange={(e) => {
+              const t = catalog.data.tags.find((x) => x.id === e.target.value);
+              if (t) addFilter(t);
+            }}
+          >
+            <option value="">选择标签</option>
+            {catalog.data.tags.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}（{t.count}）
+              </option>
+            ))}
+          </select>
+          {tagIds.map((id) => (
+            <button
+              className="keyword-chip"
+              key={id}
+              onClick={() => setTagIds((v) => v.filter((x) => x !== id))}
+            >
+              {catalog.data.tags.find((t) => t.id === id)?.name || "标签"}
+              <X size={12} />
+            </button>
+          ))}
+          {!!tagIds.length && (
+            <>
+              <select
+                aria-label="多标签匹配方式"
+                value={tagMode}
+                onChange={(e) => setTagMode(e.target.value)}
+              >
+                <option value="all">同时满足</option>
+                <option value="any">任一满足</option>
+              </select>
+              <button className="text-button" onClick={() => setTagIds([])}>
+                清除标签
+              </button>
+            </>
+          )}
+          <button className="text-button" onClick={() => setAction("tags")}>
+            管理标签
+          </button>
+        </div>
         <div className="list-meta">
           <select
             className="mobile-only"
@@ -323,7 +442,7 @@ export function Library({
             <CategoryOptions tree={tree} />
           </select>
           <span>
-            {title} <strong>{visible.length}</strong>
+            {title} <strong>{total}</strong>
           </span>
           <select
             aria-label="文献排序"
@@ -336,15 +455,34 @@ export function Library({
           </select>
         </div>
         <Status
-          error={error || failure || subset.error}
-          loading={loading || subset.loading}
+          error={error || failure || list.error}
+          loading={loading || list.loading}
           retry={onChanged}
         />
         {checked.length > 0 && (
           <div className="batch-toolbar">
             <span>已选择 {checked.length} 篇</span>
-            <button onClick={()=>setMetadataSelection({paperIds:checked})}>补全信息</button>
-            <button onClick={()=>setChecked(visible.map(p=>p.id))}>选择全部匹配（{visible.length} 篇）</button>
+            <button onClick={() => setMetadataSelection({ paperIds: checked })}>
+              补全信息
+            </button>
+            <button
+              onClick={() =>
+                setKeywordSelection(
+                  selectionId ? { selectionId } : { paperIds: checked },
+                )
+              }
+            >
+              整理／编辑标签
+            </button>
+            <button
+              onClick={() =>
+                perform(async () => {
+                  await allSelection();
+                })
+              }
+            >
+              选择全部匹配（{total} 篇）
+            </button>
             <button onClick={() => setAction("bulk-move")}>移动</button>
             <button
               onClick={() =>
@@ -359,12 +497,42 @@ export function Library({
               收藏
             </button>
             <button onClick={() => setAction("bulk-delete")}>删除</button>
-            <button onClick={() => setChecked([])}>取消选择</button>
+            <button
+              onClick={() => {
+                setChecked([]);
+                setSelectionId("");
+              }}
+            >
+              取消选择
+            </button>
           </div>
         )}
-        <div className="metadata-list-actions"><button className="text-button" disabled={!visible.length} onClick={()=>setChecked(visible.slice((page-1)*50,page*50).map(p=>p.id))}>选择当前页</button><button className="text-button" disabled={!visible.length} onClick={()=>setMetadataSelection({paperIds:visible.map(p=>p.id)})}>补全全部匹配（{visible.length} 篇）</button></div>
+        <div className="metadata-list-actions">
+          <button
+            className="text-button"
+            disabled={!total}
+            onClick={() => {
+              setChecked(visible.map((p) => p.id));
+              setSelectionId("");
+            }}
+          >
+            选择当前页
+          </button>
+          <button
+            className="text-button"
+            disabled={!total}
+            onClick={() =>
+              perform(async () => {
+                const r = await allSelection();
+                setMetadataSelection({ paperIds: r.paperIds });
+              })
+            }
+          >
+            补全全部匹配（{total} 篇）
+          </button>
+        </div>
         <div className="paper-list">
-          {visible.slice((page - 1) * 50, page * 50).map((p) => (
+          {visible.map((p) => (
             <article
               className={"paper-row " + (selected === p.id ? "selected" : "")}
               key={p.id}
@@ -380,13 +548,14 @@ export function Library({
                 aria-label={"选择 " + p.title}
                 checked={checked.includes(p.id)}
                 onClick={(e) => e.stopPropagation()}
-                onChange={(e) =>
+                onChange={(e) => (
+                  setSelectionId(""),
                   setChecked((v) =>
                     e.target.checked
                       ? [...v, p.id]
                       : v.filter((id) => id !== p.id),
                   )
-                }
+                )}
               />
               <div className="paper-row-main">
                 <div className="paper-title">
@@ -394,6 +563,7 @@ export function Library({
                   <h3>{p.title}</h3>
                 </div>
                 <p>{p.authors || "作者信息待补充"}</p>
+                <TagChips tags={p.tags || []} onSelect={addFilter} compact />
                 <div className="badges">
                   <span className={p.translated ? "badge success" : "badge"}>
                     {p.translated ? "译文可读" : "原文 PDF"}
@@ -425,13 +595,17 @@ export function Library({
               </div>
             </article>
           ))}
-          {!loading && visible.length === 0 && (
+          {!loading && total === 0 && (
             <div className="empty-state">
               <LibraryIcon size={38} />
-              <h3>{query ? "没有匹配的文献" : "从第一篇论文开始"}</h3>
+              <h3>
+                {query || tagIds.length || filter !== "all"
+                  ? "没有匹配的文献"
+                  : "从第一篇论文开始"}
+              </h3>
               <p>
-                {query
-                  ? "尝试其他标题或作者。"
+                {query || tagIds.length || filter !== "all"
+                  ? "尝试调整搜索、标签或分类条件。"
                   : "导入 PDF，或从 Daily arXiv 加入感兴趣的论文。"}
               </p>
               {!query && (
@@ -445,8 +619,8 @@ export function Library({
         </div>
         <div className="pagination">
           <span>
-            {Math.min((page - 1) * 50 + 1, visible.length)}–
-            {Math.min(page * 50, visible.length)} / {visible.length}
+            {Math.min((page - 1) * 50 + 1, total)}–{Math.min(page * 50, total)}{" "}
+            / {total}
           </span>
           <button
             aria-label="上一页列表"
@@ -456,11 +630,11 @@ export function Library({
             <ChevronLeft size={16} />
           </button>
           <span>
-            第 {page} / {Math.max(1, Math.ceil(visible.length / 50))} 页
+            第 {page} / {Math.max(1, Math.ceil(total / 50))} 页
           </span>
           <button
             aria-label="下一页列表"
-            disabled={page >= Math.ceil(visible.length / 50)}
+            disabled={page >= Math.ceil(total / 50)}
             onClick={() => setPage((n) => n + 1)}
           >
             <ChevronRight size={16} />
@@ -552,8 +726,25 @@ export function Library({
                 {paper.abstract || "暂无摘要，可在编辑元数据中补充。"}
               </p>
             </section>
-            <MetadataDetails key={paper.id+":"+metadataRevision} id={paper.id} onChanged={onChanged} onSelect={onSelect}/>
-            {paper.notes&&<section className="detail-section"><span className="section-label">文献备注</span><p>{paper.notes}</p></section>}
+            <PaperKeywords
+              key={paper.id + ":tags"}
+              id={paper.id}
+              onFilter={addFilter}
+              onChanged={changedKeywords}
+              onTasks={onTasks}
+            />
+            <MetadataDetails
+              key={paper.id + ":" + metadataRevision}
+              id={paper.id}
+              onChanged={onChanged}
+              onSelect={onSelect}
+            />
+            {paper.notes && (
+              <section className="detail-section">
+                <span className="section-label">文献备注</span>
+                <p>{paper.notes}</p>
+              </section>
+            )}
           </div>
         ) : (
           <div className="empty-state">
@@ -563,16 +754,61 @@ export function Library({
           </div>
         )}
       </aside>
+      {action === "tags" && (
+        <TagManager
+          onClose={() => setAction("")}
+          onChanged={changedKeywords}
+          onMerged={(from, to) =>
+            setTagIds((v) =>
+              Array.from(
+                new Set(
+                  v.flatMap((id) => (id === from ? (to ? [to.id] : []) : [id])),
+                ),
+              ),
+            )
+          }
+        />
+      )}
+      {keywordSelection && (
+        <KeywordBatchDialog
+          selection={keywordSelection}
+          onClose={() => setKeywordSelection(null)}
+          onChanged={changedKeywords}
+          onCreated={() => {
+            setKeywordSelection(null);
+            changedKeywords();
+            onTasks();
+          }}
+        />
+      )}
       {action === "edit" && paper && (
         <MetadataEditor
           key={paper.id}
           id={paper.id}
           onClose={() => setAction("")}
-          onSaved={()=>{setMetadataRevision(v=>v+1);onChanged()}}
+          onSaved={() => {
+            setMetadataRevision((v) => v + 1);
+            onChanged();
+          }}
         />
       )}
-      {metadataSelection&&<MetadataBatchDialog selection={metadataSelection} onClose={()=>setMetadataSelection(null)} onCreated={()=>{setMetadataSelection(null);onTasks()}}/>}
-      {action === "notes" && paper && <EditNotes paper={paper} onClose={()=>setAction("")} onSaved={onChanged}/>}
+      {metadataSelection && (
+        <MetadataBatchDialog
+          selection={metadataSelection}
+          onClose={() => setMetadataSelection(null)}
+          onCreated={() => {
+            setMetadataSelection(null);
+            onTasks();
+          }}
+        />
+      )}
+      {action === "notes" && paper && (
+        <EditNotes
+          paper={paper}
+          onClose={() => setAction("")}
+          onSaved={onChanged}
+        />
+      )}
       {action === "translate" && paper && (
         <TranslationDialog
           paper={paper}
@@ -645,7 +881,10 @@ export function Library({
                 ? "移出 Reading List"
                 : "加入 Reading List"}
             </button>
-            <button onClick={() => setAction("notes")}><Pencil size={16}/>编辑文献备注</button>
+            <button onClick={() => setAction("notes")}>
+              <Pencil size={16} />
+              编辑文献备注
+            </button>
             <button onClick={() => setAction("move")}>
               <FolderInput size={16} />
               移动到分类
@@ -742,7 +981,7 @@ function EditNotes({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [draft,setDraft]=useState({notes:paper.notes||""}),
+  const [draft, setDraft] = useState({ notes: paper.notes || "" }),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   return (

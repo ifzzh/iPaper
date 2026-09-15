@@ -1,0 +1,236 @@
+.keyword-chips {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  align-items: center;
+}
+.keyword-chip {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: var(--accent-bg);
+  color: var(--accent, #168272);
+  border: 1px solid transparent;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.keyword-chip:hover {
+  border-color: var(--accent);
+}
+.keyword-more {
+  font-size: 12px;
+  padding: 3px 6px;
+  background: transparent;
+  color: var(--muted);
+}
+.keyword-heading,
+.keyword-edit-row,
+.keyword-actions,
+.tag-manager-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+.keyword-heading .section-label {
+  margin: 0;
+}
+.keyword-edit {
+  margin-top: 12px;
+  display: grid;
+  gap: 6px;
+}
+.keyword-edit form {
+  display: flex;
+  gap: 6px;
+}
+.keyword-edit input {
+  min-width: 0;
+  flex: 1;
+}
+.keyword-edit-row > span {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.keyword-edit-row button {
+  font-size: 12px;
+  padding: 4px 6px;
+}
+.keyword-actions {
+  margin-top: 12px;
+}
+.keyword-actions small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.keyword-actions button,
+.keyword-heading button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.keyword-undo {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.keyword-undo button {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+.keyword-filter-bar {
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+}
+.keyword-filter-bar > span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.keyword-filter-bar .keyword-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.keyword-filter-bar select {
+  width: auto;
+  max-width: 180px;
+  padding: 5px;
+}
+.tag-manager-toolbar input {
+  flex: 1;
+  min-width: 0;
+}
+.tag-manager-layout {
+  display: grid;
+  grid-template-columns: minmax(160px, 230px) minmax(0, 1fr);
+  gap: 20px;
+  margin-top: 16px;
+}
+.tag-catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 440px;
+  overflow: auto;
+}
+.tag-catalog button {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.tag-catalog small {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.tag-catalog button.selected {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+.tag-editor {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+.tag-editor .field {
+  margin-bottom: 0;
+}
+.tag-danger-zone {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 10px;
+}
+.keyword-history {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 16px;
+}
+.keyword-history > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+.keyword-preview {
+  border: 1px solid var(--border);
+  background: var(--subtle);
+  border-radius: 8px;
+  padding: 14px;
+  font-size: 13px;
+}
+.keyword-counts {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  margin: 12px 0;
+}
+.keyword-task-items > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 0;
+}
+.keyword-task-items span {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.keyword-task-items small {
+  color: var(--muted);
+}
+.keyword-task-items p {
+  grid-column: 1/-1;
+}
+.keyword-section .muted {
+  font-size: 13px;
+}
+.keyword-filters-select {
+  min-width: 100px;
+}
+.keyword-batch-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+@media (max-width: 700px) {
+  .tag-manager-layout {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .tag-catalog {
+    max-height: 170px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .tag-manager-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .keyword-filter-bar {
+    padding: 8px;
+  }
+  .keyword-chip {
+    font-size: 12px;
+  }
+  .keyword-filter-bar select {
+    max-width: 140px;
+  }
+}

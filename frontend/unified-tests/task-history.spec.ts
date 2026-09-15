@@ -12,8 +12,9 @@ test("persisted translation history uses the real job identifier and opens termi
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/?view=tasks");
-  await expect(page.locator(".task-card")).toHaveCount(1);
-  await page.locator(".task-card").click();
+  const completed = page.locator(".task-card").filter({ hasText: "已完成" });
+  await expect(completed).toHaveCount(1);
+  await completed.click();
   await expect(page.locator(".task-log")).toContainText("合成终态日志");
   await expect(
     page.getByRole("button", { name: "重试", exact: true }),

@@ -7,15 +7,43 @@ export class ApiError extends Error {
   }
 }
 const processingErrors: Record<string, string> = {
-  invalid_bookmark_name:"书签名称需要 1–120 个字符。",
-  bookmark_changed:"书签已在另一处更新，请重新打开书签列表后再操作。",
-  bookmark_limit:"书签已达上限：每篇 200 条、每账号 5,000 条。",
-  reading_search_expired:"内容或译文修订已变化，请重新搜索，避免混合不同版本。",
-  selection_length_limit:"一次最多翻译 2,000 个字符；请缩短选区，不会自动截断。",
-  selection_input_limit:"选区超过本次输入预算，请缩短后明确提交。",
-  selection_cache_quota:"划词缓存已达账号上限，请等待到期清理或联系管理员。",
-  selection_source_mismatch:"选区与来源版本不匹配，请重新选择。",
-  selection_explicit_retry_required:"请回到原选区翻译窗口明确重试；不会自动追加模型请求。",
+  tag_revision_conflict: "标签已在另一处更新。草稿已保留，请重新载入后核对。",
+  tag_name_conflict: "此名称或别名已属于其他标签，请明确合并或改用其他名称。",
+  tag_deleted: "这个标签已删除，可以在标签管理中恢复。",
+  tag_name_retired:
+    "此别名已移除，不会由自动任务重新创建。请在标签管理中核对。",
+  tag_undo_conflict:
+    "相关内容在此操作后已被修改，不能直接撤销覆盖。请重新核对。",
+  tag_undo_unavailable: "此操作已撤销或超过 30 天恢复期限。",
+  invalid_tag_name: "请输入 1–64 个字符的有效标签名称。",
+  keyword_queue_full: "整理队列已满，请等待现有任务结束后重试。",
+  keyword_storage_failed: "标签保存失败，原有标签保留，请重试。",
+  keyword_failed: "整理未完成，原有标签保留，请查看任务并重试。",
+  keyword_source_changed: "论文内容已变化，请使用当前内容重新整理。",
+  keyword_preview_changed: "输入内容或模型配置已变化，请重新打开预检。",
+  keyword_input_limit:
+    "所选正文超过单次增强预算，请使用本地整理或选择更短的论文。",
+  keyword_model_batch_limit: "一次模型增强最多选择 20 篇论文。",
+  keyword_evidence_invalid: "模型关键词缺少有效原文依据，本次未应用。",
+  tag_catalog_limit: "标签库已达到 5,000 个有效标签，请先整理现有标签。",
+  paper_tag_limit: "这篇论文已达到 128 个标签，请先移除不需要的标签。",
+  library_selection_expired: "全部匹配的选择已过期，请重新选择。",
+  keyword_nothing_to_retry: "没有需要重试的任务。",
+  keyword_cancelled: "任务已取消，尚未开始的请求不会继续。",
+  keyword_interrupted: "本地整理被中断，可重新整理。",
+
+  invalid_bookmark_name: "书签名称需要 1–120 个字符。",
+  bookmark_changed: "书签已在另一处更新，请重新打开书签列表后再操作。",
+  bookmark_limit: "书签已达上限：每篇 200 条、每账号 5,000 条。",
+  reading_search_expired:
+    "内容或译文修订已变化，请重新搜索，避免混合不同版本。",
+  selection_length_limit:
+    "一次最多翻译 2,000 个字符；请缩短选区，不会自动截断。",
+  selection_input_limit: "选区超过本次输入预算，请缩短后明确提交。",
+  selection_cache_quota: "划词缓存已达账号上限，请等待到期清理或联系管理员。",
+  selection_source_mismatch: "选区与来源版本不匹配，请重新选择。",
+  selection_explicit_retry_required:
+    "请回到原选区翻译窗口明确重试；不会自动追加模型请求。",
   paper_content_missing:
     "尚无可用正文。请先明确创建解析任务，系统不会自动付费解析。",
   content_version_changed: "解析正文版本已变化，请刷新并重新核对范围。",
@@ -158,6 +186,7 @@ export type User = {
   must_change_password?: boolean;
 };
 export type Paper = {
+  tags?: { id: string; name: string }[];
   id: string;
   title: string;
   authors: string;
@@ -190,6 +219,14 @@ export function paperFrom(data: unknown): Paper {
   const p = data as Record<string, unknown>;
   return {
     id: text(p.id),
+    tags: Array.isArray(p.tags)
+      ? p.tags
+          .filter(
+            (t: any) =>
+              t && typeof t.id === "string" && typeof t.name === "string",
+          )
+          .map((t: any) => ({ id: t.id, name: t.name }))
+      : [],
     title:
       text(p.title) ||
       text(p.original_filename) ||
@@ -228,7 +265,7 @@ export async function session(signal: AbortSignal): Promise<User | null> {
   return { id: data.user.id, username: data.user.username };
 }
 export async function papers(signal: AbortSignal) {
-  const data = await request("/api/papers/all", signal);
+  const data = await request("/api/library/index", signal);
   if (!Array.isArray(data)) throw new ApiError(200, "invalid_list");
   return data.map(paperFrom);
 }

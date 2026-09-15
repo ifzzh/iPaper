@@ -79,7 +79,13 @@ test("continuous PDF, strict CSP, positions, translated variant and selection ch
   const text = page.locator(".pdf-panel .textLayer");
   await expect(text.first()).toContainText("Synthetic reader validation");
   await expect(page.locator(".page-count")).toHaveText("/ 100");
-  await expect(page.locator(".paper-tab")).toHaveCount(1);
+  // Other papers may already be restored from this user's saved workspace.
+  await expect(
+    page.getByRole("tab", {
+      name: "Learning to read the world: a unified framework for embodied reasoning",
+      exact: true,
+    }),
+  ).toHaveCount(1);
   await page.getByLabel("页码", { exact: true }).fill("5");
   await page.getByLabel("页码", { exact: true }).press("Enter");
   await expect(

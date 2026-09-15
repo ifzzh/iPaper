@@ -71,11 +71,14 @@ function App() {
     channel = useRef<BroadcastChannel | null>(null),
     shell = useRef<HTMLDivElement>(null);
   const allowed = !!user && !user.must_change_password;
-  const categories = useResource<Category>(allowed ? "/api/categories" : null, {
-    id: "root",
-    name: "Root",
-    children: [],
-  });
+  const categories = useResource<Category>(
+    allowed ? "/api/library/navigation" : null,
+    {
+      id: "root",
+      name: "Root",
+      children: [],
+    },
+  );
   const detail = useResource<any>(
     allowed && locationState.paper
       ? "/api/paper/" + encodeURIComponent(locationState.paper)

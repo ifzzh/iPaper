@@ -109,6 +109,8 @@ def install_reader_fixture(application, root, users, monkeypatch, origin, *, reg
     monkeypatch.setattr(agent_translate_route,'paper_store',store)
     key=generate_settings_key(root/'settings.key'); monkeypatch.setenv('IPAPER_SETTINGS_KEY_FILE',str(key)); credentials=AgenticCredentialStore.from_key_file(str(key))
     class LoopbackFixturePolicy(OutboundPolicy):
+        def list_providers(self):
+            return []  # No production providers or credentials in the test UI.
         # Production policy intentionally forbids loopback. This exact-origin test
         # policy exists only in this fixture and can reach only the ephemeral fake.
         def validate(self, url, *, purpose):
