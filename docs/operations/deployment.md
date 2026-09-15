@@ -18,6 +18,10 @@ Use a published [GitHub Release](https://github.com/ifzzh/iPaper/releases), read
 
 Production uses `repository:version@sha256:…` references. Worker versions are reused when unchanged; Workers do not use `latest`. The source matrix is in [release-components.json](../../docker/release-components.json).
 
+1.6.0 upgrades only Web; both Workers remain on verified 1.2.0 digests. Keyword tables are additive. Capture a new stopped release backup before upgrading, retain the current database on rollback, and stop new keyword jobs before starting an older Web. See [the keyword release](../releases/v1.6.0.md) and [backup procedure](structured-backup.md).
+
+1.6.0 仅更新 Web。回退保留新增标签、别名、自动排除和当前用户数据；不要使用旧数据库覆盖升级后的修改。Web latest 仅在正式阅读及重启验收后更新。
+
 ## 2. Prepare storage and configuration / 准备存储与配置
 
 Copy the release's Compose and environment example into a deployment directory outside the source checkout. Review every bind mount and secret path before starting services.

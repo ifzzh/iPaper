@@ -24,6 +24,8 @@ A version number or screen on the development branch does not establish release 
 
 1.6.0 adds independent keyword tags: background local extraction after admission, protected manual corrections and exclusions, aliases/rename/merge, AND/OR filtering, and consistent server pagination with frozen cross-page batches. Model enhancement requires an explicit action; default organization calls no model, MinerU, OCR or bibliographic service. See [keyword usage and limits](docs/development/keywords.md) and [release status and digests](docs/releases/v1.6.0.md). Only Web changes; Workers 1.2.0 remain compatible. Existing [metadata enrichment](docs/development/metadata.md), dual translations and reading tools remain available.
 
+Deployment and restart acceptance for 1.6.0 are complete; the published Web digest and unchanged Worker digests are recorded in the release notes. Local extraction was validated on existing admitted papers without provider calls. Optional model enhancement was tested with an isolated fake supplier; no new paid-model acceptance was performed.
+
 ## Capabilities and direction
 
 | Area | Available now | Further development |
