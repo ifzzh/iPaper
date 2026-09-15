@@ -29,6 +29,8 @@ def _save_head(db, owner, paper_id, fields, provenance, revision, original_title
     db.execute('INSERT OR REPLACE INTO bibliography_revisions VALUES (?,?,?,?,?,?,?)',
         (owner,paper_id,revision,encoded(fields),encoded(provenance),reason,now))
     db.execute('INSERT INTO metadata_index_events(owner_id,paper_id,revision) VALUES (?,?,?) ON CONFLICT(owner_id,paper_id) DO UPDATE SET revision=excluded.revision,attempts=0', (owner,paper_id,revision))
+    from ipaper.keywords.store import queue_change
+    queue_change(db,owner,paper_id)
 
 
 def ensure_head(db, owner, paper, *, initial=False):
@@ -66,6 +68,9 @@ def after_save(db, owner, paper, *, new):
     if inspection and isinstance(inspection,dict): cache_inspection(db,owner,paper['id'],inspection)
     db.execute('INSERT INTO metadata_index_events(owner_id,paper_id,revision) VALUES (?,?,?) ON CONFLICT(owner_id,paper_id) DO UPDATE SET revision=excluded.revision,attempts=0',(owner,paper['id'],head['revision']))
     if new and in_library(paper): enqueue(db,owner,[paper['id']],kind='import')
+    if new and in_library(paper):
+        from ipaper.keywords.store import queue_change
+        queue_change(db,owner,paper['id'])
 
 
 def cache_inspection(db,owner,paper_id,data):
@@ -176,29 +181,11 @@ class MetadataStore:
         with self.connection(True) as db:return enqueue(db,self.owner,paper_ids,force=force)
 
     def selection(self,query):
-        if not isinstance(query,dict) or set(query)-{'scope','query','categoryIds'}:raise MetadataError('invalid_metadata_selection')
-        with self.connection() as db:
-            rows=[unpack(r) for r in db.execute('SELECT * FROM papers WHERE owner_id=?',(self.owner,))]
-            reading={r[0] for r in db.execute('SELECT paper_id FROM reading_list WHERE owner_id=?',(self.owner,))}
-        scope=query.get('scope','all'); text=str(query.get('query','')).strip().casefold()
-        category_ids=query.get('categoryIds',[])
-        if scope not in {'all','favorites','reading','categories'}:raise MetadataError('invalid_metadata_selection')
-        if not isinstance(category_ids,list) or len(category_ids)>1000 or any(not isinstance(v,str) for v in category_ids):raise MetadataError('invalid_metadata_selection')
-        result=[]
-        for p in rows:
-            if not in_library(p):continue
-            if scope=='favorites' and not p.get('starred'):continue
-            if scope=='reading' and p['id'] not in reading:continue
-            if scope=='categories':
-                from ipaper.security.paths import category_storage_id
-                from pathlib import PurePath
-                # Historic rows may predate the explicit category field. The
-                # existing immutable directory mapping is authoritative.
-                parent=PurePath(p.get('file_path','')).parent.name
-                if p.get('category_id') not in category_ids and parent not in {category_storage_id(c) for c in category_ids}:continue
-            if text and text not in ' '.join(str(p.get(k) or '') for k in ('title','authors','abstract','year','journal','doi')).casefold():continue
-            result.append(p['id'])
-        return sorted(result)
+        from ipaper.keywords.query import members
+        from ipaper.keywords.common import KeywordError
+        try:
+            with self.connection() as db:return [p['id'] for p in members(db,self.owner,query)]
+        except KeywordError as e:raise MetadataError(e.code,e.status) from None
 
     def batches(self,limit=50):
         with self.connection() as db:

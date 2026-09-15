@@ -1,0 +1,308 @@
+[
+  {
+    "id": "keyword-sample-01",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Quasar Spectroscopy: Evidence and Limitations",
+    "abstract": "Quasar spectroscopy resolves emission lines from distant galaxies. Adaptive telescope calibration corrects wavelength drift. Quasar spectroscopy estimates redshift without assuming a fixed stellar population.",
+    "mainTerm": "quasar spectroscopy",
+    "rawKeywords": [],
+    "metadataStatus": "failed"
+  },
+  {
+    "id": "keyword-sample-02",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Battery Degradation: Evidence and Limitations",
+    "abstract": "Battery degradation limits electric vehicle lifetime. Impedance measurements distinguish lithium plating from capacity loss. Battery degradation prediction combines current histories with thermal observations.",
+    "mainTerm": "battery degradation",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-03",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Protein Folding: Evidence and Limitations",
+    "abstract": "Protein folding connects amino acid sequences to molecular structures. We compare physical energy functions with evolutionary sequence constraints. Protein folding accuracy is measured against experimentally determined structures.",
+    "mainTerm": "protein folding",
+    "rawKeywords": [
+      "protein folding"
+    ],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-04",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Quantum Error Correction: Evidence and Limitations",
+    "abstract": "Quantum error correction protects logical qubits from decoherence. Syndrome measurements identify correlated faults in surface codes. Quantum error correction reduces logical failures while preserving computational states.",
+    "mainTerm": "quantum error correction",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-05",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Seismic Inversion: Evidence and Limitations",
+    "abstract": "Seismic inversion estimates subsurface velocity from reflected waves. Sparse acquisition introduces uncertainty in geological boundaries. Seismic inversion is assessed using independent borehole measurements.",
+    "mainTerm": "seismic inversion",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-06",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Causal Inference: Evidence and Limitations",
+    "abstract": "Causal inference separates intervention effects from statistical association. Hidden confounders bias observational estimates. Causal inference uses negative controls to test identifying assumptions.",
+    "mainTerm": "causal inference",
+    "rawKeywords": [],
+    "metadataStatus": "needs_review"
+  },
+  {
+    "id": "keyword-sample-07",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Differential Privacy: Evidence and Limitations",
+    "abstract": "Differential privacy bounds the information revealed about an individual. Noise calibration trades statistical utility for privacy guarantees. Differential privacy is evaluated under repeated releases.",
+    "mainTerm": "differential privacy",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-08",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Neural Compression: Evidence and Limitations",
+    "abstract": "Neural compression learns compact representations of visual signals. Rate distortion optimization balances bit rate and reconstruction fidelity. Neural compression experiments compare entropy models on unseen images.",
+    "mainTerm": "neural compression",
+    "rawKeywords": [],
+    "metadataStatus": "failed"
+  },
+  {
+    "id": "keyword-sample-09",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Sparse Attention: Evidence and Limitations",
+    "abstract": "Sparse attention reduces pairwise interactions in long sequences. Block patterns preserve local dependencies and selected global context. Sparse attention is measured by retrieval quality and memory consumption.",
+    "mainTerm": "sparse attention",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-10",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Federated Learning: Evidence and Limitations",
+    "abstract": "Federated learning trains shared predictors without pooling private records. Heterogeneous clients create distribution shifts. Federated learning aggregates updates while accounting for uneven participation.",
+    "mainTerm": "federated learning",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-11",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Graph Neural Networks: Evidence and Limitations",
+    "abstract": "Graph neural networks propagate messages along molecular bonds. Node features describe atomic environments. Graph neural networks predict molecular properties across held-out chemical scaffolds.",
+    "mainTerm": "graph neural networks",
+    "rawKeywords": [],
+    "metadataStatus": "needs_review"
+  },
+  {
+    "id": "keyword-sample-12",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Robot Trajectory Segmentation: Evidence and Limitations",
+    "abstract": "Robot trajectory segmentation divides continuous demonstrations into reusable motion units. Kinematic change points complement visual observations. Robot trajectory segmentation is evaluated on manipulation sequences.",
+    "mainTerm": "robot trajectory segmentation",
+    "rawKeywords": [
+      "robot trajectory segmentation"
+    ],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-13",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Temporal Action Segmentation: Evidence and Limitations",
+    "abstract": "Temporal action segmentation assigns action labels throughout a video. Boundary uncertainty leads to fragmented predictions. Temporal action segmentation combines long-range context with duration constraints.",
+    "mainTerm": "temporal action segmentation",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-14",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Resource Isolation: Evidence and Limitations",
+    "abstract": "Resource isolation prevents interference between colocated applications. Shared memory bandwidth creates tail latency spikes. Resource isolation is tested under simultaneous workloads.",
+    "mainTerm": "resource isolation",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-15",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Compiler Optimization: Evidence and Limitations",
+    "abstract": "Compiler optimization transforms programs while preserving observable behavior. Register pressure can reverse apparent instruction savings. Compiler optimization compares executable runtime across independent benchmarks.",
+    "mainTerm": "compiler optimization",
+    "rawKeywords": [],
+    "metadataStatus": "failed"
+  },
+  {
+    "id": "keyword-sample-16",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Memory Compression: Evidence and Limitations",
+    "abstract": "Memory compression stores inactive pages in compact representations. The decompression overhead depends on access locality. Memory compression reduces resident memory under controlled page-fault budgets.",
+    "mainTerm": "memory compression",
+    "rawKeywords": [],
+    "metadataStatus": "needs_review"
+  },
+  {
+    "id": "keyword-sample-17",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "World Models: Evidence and Limitations",
+    "abstract": "World models represent state transitions in physical environments. Object interactions constrain executable scene representations. World models are evaluated on counterfactual predictions.",
+    "mainTerm": "world models",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-18",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Offline Reinforcement Learning: Evidence and Limitations",
+    "abstract": "Offline reinforcement learning derives policies from fixed datasets. Distribution shift can amplify unsupported actions. Offline reinforcement learning constrains policy updates using behavior coverage.",
+    "mainTerm": "offline reinforcement learning",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-19",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Speech Recognition: Evidence and Limitations",
+    "abstract": "Speech recognition maps acoustic signals to word sequences. Accent variation and overlapping speakers reduce transcription quality. Speech recognition is evaluated using speaker-disjoint recordings.",
+    "mainTerm": "speech recognition",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-20",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Semantic Segmentation: Evidence and Limitations",
+    "abstract": "Semantic segmentation labels pixels by object category. Small structures are lost by aggressive downsampling. Semantic segmentation preserves boundaries using multiscale representations.",
+    "mainTerm": "semantic segmentation",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-21",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Orbital Debris: Evidence and Limitations",
+    "abstract": "Orbital debris threatens spacecraft during close approaches. Radar tracks constrain uncertain trajectories. Orbital debris monitoring combines observations from geographically separated stations.",
+    "mainTerm": "orbital debris",
+    "rawKeywords": [],
+    "metadataStatus": "needs_review"
+  },
+  {
+    "id": "keyword-sample-22",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Microfluidic Sorting: Evidence and Limitations",
+    "abstract": "Microfluidic sorting separates biological cells by physical properties. Channel geometry changes hydrodynamic forces. Microfluidic sorting measures purity and throughput without fluorescent labeling.",
+    "mainTerm": "microfluidic sorting",
+    "rawKeywords": [],
+    "metadataStatus": "failed"
+  },
+  {
+    "id": "keyword-sample-23",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "Carbon Sequestration: Evidence and Limitations",
+    "abstract": "Carbon sequestration stores atmospheric carbon in soils and geological reservoirs. Monitoring must distinguish seasonal exchange from permanent storage. Carbon sequestration estimates integrate field measurements with uncertainty bounds.",
+    "mainTerm": "carbon sequestration",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-24",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "动作分词",
+    "abstract": "动作分词将连续机器人动作表示为可复用的离散单元。动作分词通过局部轨迹变化识别边界，并保留长时序动作的信息。实验比较不同分词长度对控制精度的影响。",
+    "mainTerm": "动作分词",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-25",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "数据筛选",
+    "abstract": "数据筛选用于去除重复样本和低质量记录。我们根据语义覆盖和标注一致性进行数据筛选，并在独立测试集上检验泛化能力。",
+    "mainTerm": "数据筛选",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-26",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "尾延迟",
+    "abstract": "尾延迟反映在线服务最慢请求的响应时间。共享资源竞争会放大尾延迟。调度策略在多租户负载下限制请求排队时间。",
+    "mainTerm": "尾延迟",
+    "rawKeywords": [
+      "尾延迟"
+    ],
+    "metadataStatus": "needs_review"
+  },
+  {
+    "id": "keyword-sample-27",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "图神经网络",
+    "abstract": "图神经网络沿图中的边传递节点信息。本文利用图神经网络预测分子的结构性质，使用不同化学骨架划分训练集与测试集。",
+    "mainTerm": "图神经网络",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-28",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "因果推断",
+    "abstract": "因果推断需要区分统计相关与干预效应。未观测混杂因素会导致估计偏差。因果推断通过负对照变量检验识别条件。",
+    "mainTerm": "因果推断",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  },
+  {
+    "id": "keyword-sample-29",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "医学图像分割",
+    "abstract": "医学图像分割识别器官边界和病灶区域。医学图像分割需要处理不同设备造成的域偏移，实验使用独立医院的影像数据。",
+    "mainTerm": "医学图像分割",
+    "rawKeywords": [],
+    "metadataStatus": "failed"
+  },
+  {
+    "id": "keyword-sample-30",
+    "source": "Original synthetic academic text authored for iPaper keyword acceptance",
+    "license": "CC BY-NC 4.0",
+    "title": "多模态检索",
+    "abstract": "多模态检索通过联合表征匹配文本和图像。多模态检索评估关注未见类别上的语义一致性，并分析负样本选择的影响。",
+    "mainTerm": "多模态检索",
+    "rawKeywords": [],
+    "metadataStatus": "completed"
+  }
+]

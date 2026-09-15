@@ -178,6 +178,11 @@ class PaperDAO:
             db.execute('DELETE FROM metadata_duplicate_dismissals WHERE owner_id=? AND (paper_id=? OR other_id=?)',(owner,paper_id,paper_id))
             db.execute('INSERT OR REPLACE INTO metadata_index_events(owner_id,paper_id,revision) VALUES (?,?,0)',(owner,paper_id))
         db.execute('DELETE FROM papers WHERE id=? AND owner_id=?', (paper_id, owner))
+        from ipaper.keywords.store import exists as has_keywords
+        if has_keywords(db):
+            for table in ('keyword_links','keyword_exclusions','keyword_papers','keyword_pending'):
+                db.execute(f'DELETE FROM {table} WHERE owner_id=? AND paper_id=?',(owner,paper_id))
+            db.execute("UPDATE keyword_items SET status='deleted',error='paper_not_found' WHERE owner_id=? AND paper_id=? AND status IN ('queued','running')",(owner,paper_id))
         db.commit()
 
     @staticmethod

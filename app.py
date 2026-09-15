@@ -187,6 +187,11 @@ def _rate_limit_response(bucket: str, identity: str, limit: int, window: int):
 
 def _sensitive_rate_policy():
     path = request.path
+    if request.endpoint and request.endpoint.startswith("keywords."):
+        if request.endpoint == "keywords.create":
+            return "keyword_jobs", 60, 3600
+        if request.method in {"POST", "PATCH", "PUT", "DELETE"}:
+            return "keyword_edits", 180, 60
     if request.endpoint in {"workspace_state", "reading_position", "api_record_read_time", "api_record_reading", "processing.understanding_position", "processing.document_position", "processing.position"} and request.method in {"POST", "PUT"}:
         return "reading_state", 120, 60
     if request.endpoint in {"processing.document", "processing.search", "processing.selection_preview"} and request.method == "POST":
@@ -1035,10 +1040,15 @@ def register_routes():
     from ipaper.metadata.routes import register_metadata_routes
     metadata_service = MetadataService(DB_PATH, processing_service, paper_store, search_index)
     register_metadata_routes(app, metadata_service)
+    from ipaper.keywords.service import KeywordService
+    from ipaper.keywords.routes import register_keyword_routes
+    keyword_service = KeywordService(DB_PATH, processing_service)
+    register_keyword_routes(app, keyword_service)
     processing_service.initialize_ifzzh()
     if app.config.get("IPAPER_START_BACKGROUND_TASKS", False):
         processing_service.start()
         metadata_service.start()
+        keyword_service.start()
 
     register_settings_routes(
         app,
@@ -1298,6 +1308,9 @@ def _initialize_application(papers_dir: str) -> None:
 
     # Paper data is now directly stored in the JSON file next to the PDF file
 def shutdown_application() -> None:
+    keyword_service = app.extensions.get('keywords')
+    if keyword_service:
+        keyword_service.shutdown()
     metadata_service = app.extensions.get("metadata")
     if metadata_service:
         metadata_service.shutdown()

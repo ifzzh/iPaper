@@ -288,3 +288,5 @@ CREATE TABLE IF NOT EXISTS ai_providers (
 
 from ipaper.metadata.schema import SCHEMA as METADATA_SCHEMA
 SCHEMA_SCRIPT += METADATA_SCHEMA
+from ipaper.keywords.schema import SCHEMA as KEYWORD_SCHEMA
+SCHEMA_SCRIPT += KEYWORD_SCHEMA

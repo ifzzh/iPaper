@@ -209,6 +209,8 @@ class ProcessingStore:
                 db.executemany("INSERT INTO processing_blocks VALUES (?,?,?,?,?,?,?)", entries)
                 db.execute("UPDATE processing_results SET status='completed',manifest_json=?,bytes=?,block_count=?,updated_at=? WHERE id=? AND owner_id=?",
                            (encoded(manifest), total, len(entries), now(), result_id, self.owner))
+                from ipaper.keywords.store import queue_change
+                queue_change(db,self.owner,result['paper_id'])
         except BaseException:
             # Only this unpublished UUID tree can be removed; never old results.
             if published:
