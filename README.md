@@ -22,14 +22,14 @@ A version number or screen on the development branch does not establish release 
 
 [Release 1.4.0](https://github.com/ifzzh/iPaper/releases/tag/v1.4.0) is deployed and verified. It adds full-document search, outlines and versioned bookmarks, cached paragraph translations in the original PDF, explicit selection translation, and figure/table/formula enlargement. No OCR or model request is triggered by searching or reading cached results. See [reading tools and limits](docs/development/reading-tools.md). That release uses Web 1.4.0 with Workers 1.2.0.
 
-[Release 1.5.0](https://github.com/ifzzh/iPaper/releases/tag/v1.5.0) is deployed with background bibliographic enrichment after safe PDF admission, protected manual edits (including explicit clears), full authors and publication identifiers, current BibTeX, and non-destructive duplicate suggestions. Single and batch tasks persist across restarts. No models, MinerU or OCR are used for metadata. See [metadata usage, provider availability and limits](docs/development/metadata.md). The verified combination is Web 1.5.0 with unchanged Workers 1.2.0; see the [release record](docs/releases/v1.5.0.md) for acceptance evidence.
+1.6.0 adds independent keyword tags: background local extraction after admission, protected manual corrections and exclusions, aliases/rename/merge, AND/OR filtering, and consistent server pagination with frozen cross-page batches. Model enhancement requires an explicit action; default organization calls no model, MinerU, OCR or bibliographic service. See [keyword usage and limits](docs/development/keywords.md) and [release status and digests](docs/releases/v1.6.0.md). Only Web changes; Workers 1.2.0 remain compatible. Existing [metadata enrichment](docs/development/metadata.md), dual translations and reading tools remain available.
 
 ## Capabilities and direction
 
 | Area | Available now | Further development |
 | --- | --- | --- |
 | Discovery | Daily arXiv, research topics, filtering, candidates and PDF asset processing | Discovery workflow refinements |
-| Library | PaperQuay-inspired category/list/detail workspace; upload, search, favorites, Reading List Zotero RDF import, durable metadata enrichment, revision-protected editing and BibTeX | Library-operation agents |
+| Library | PaperQuay-inspired category/list/detail workspace; upload, search, favorites, Reading List Zotero RDF import, durable metadata enrichment, revision-protected editing, BibTeX, persistent keyword corrections and cross-page tag filtering | Library-operation agents |
 | Reading | Continuous PDFs, full-document search, outlines, bookmarks, figure enlargement, independent positions, verified sources and sidebar chat | Linked notes and annotations |
 | Translation | BabelDOC mono/dual PDFs and independently stored structured bilingual blocks; bounded tasks, paragraph-cache viewing, explicit selection translation and block retries | Further language and layout refinements |
 | Accounts and data | Local accounts, user-scoped data, server-side model settings and persistent tasks | Preserve existing papers, settings and chat history |
