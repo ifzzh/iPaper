@@ -319,6 +319,7 @@ def test_unrelated_concepts_punctuation_and_extractive_phrases():
     assert normalize_phrase("RL") == "强化学习"
     assert normalize_phrase("offline RL") == "离线强化学习"
     assert normalize_phrase("C++") == "C++"
+    assert normalize_phrase("data filtering") != normalize_phrase("data selection")
     source = {
         "sections": [
             {

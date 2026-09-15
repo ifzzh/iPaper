@@ -14,7 +14,8 @@ CONCEPTS = [
     ("模仿学习", ["imitation learning"]),
     ("机器人学习", ["robot learning"]),
     ("动作分词", ["action tokenization"]),
-    ("数据筛选", ["data filtering", "data selection"]),
+    ("数据筛选", ["data filtering"]),
+    ("数据选择", ["data selection"]),
     ("KV cache", ["key-value cache", "key value cache", "kv cache"]),
     (
         "SLO",
