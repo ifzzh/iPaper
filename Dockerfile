@@ -154,6 +154,7 @@ COPY ipaper /app/ipaper
 COPY static /app/static
 COPY --from=frontend-build /build/static/workbench /app/static/workbench
 COPY templates /app/templates
+COPY docs/licenses/jieba.txt /app/licenses/jieba.txt
 
 RUN groupadd --gid 1001 ipaper \
  && useradd --uid 10001 --gid 1001 --no-create-home --home-dir /app --shell /usr/sbin/nologin ipaper \

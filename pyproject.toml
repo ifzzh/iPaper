@@ -37,6 +37,7 @@ ipaper-auth = "ipaper.auth_cli:main"
 local = [] 
 web = [
     "gunicorn==26.2.0",
+    "jieba==0.42.1",
 ]
 translation = [
     "BabelDOC==0.6.4",
