@@ -372,7 +372,11 @@ export function Chat({
               }
             }
           } else if (valid(seq))
-            setNotice("未获得会话编号，请刷新历史核对；不会自动重发。");
+            setNotice(
+              stopped
+                ? "已停止接收，服务端可能继续处理；尚未获得会话编号，请刷新历史核对。"
+                : "未获得会话编号，请刷新历史核对；不会自动重发。",
+            );
         } catch (e) {
           if (valid(seq) && !c.signal.aborted) {
             if (isSessionError(e)) expire();
