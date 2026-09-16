@@ -80,3 +80,5 @@ Use [the migration guide](ipaper-migration.md) for existing installations. Never
 ## 1.7.0 主题分类
 
 1.7.0 仅发布 Web；Workers1.2.0 不重建。部署前重新检查主题/关键词/元数据、processing、导入和 Daily 活动项。创建本轮停写备份，回退基线为 Web1.6.0，不能复用1.6发布时恢复1.5的脚本。固定摘要部署并实际浏览、阅读和重启验收后才更新 Web latest。
+
+正式1.7.0组件摘要与验收状态见[发布记录](../releases/v1.7.0.md)。本轮升级后日常备份已核验包含主题、排除及任务表；派生搜索索引可因正常Daily更新，不能与不可变论文内容混为一类。

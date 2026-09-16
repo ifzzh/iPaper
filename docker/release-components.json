@@ -3,7 +3,8 @@
   "web": {
     "tag": "1.7.0",
     "publish": true,
-    "repository": "ifzzh520/ipaper"
+    "repository": "ifzzh520/ipaper",
+    "digest": "sha256:5ff3e258aeb2ef4b1b22aad5e9037672fc3da891550a2f4a77774a32d4b553cd"
   },
   "translation_worker": {
     "tag": "1.2.0",

@@ -22,6 +22,8 @@ A version number or screen on the development branch does not establish release 
 
 [Release 1.4.0](https://github.com/ifzzh/iPaper/releases/tag/v1.4.0) is deployed and verified. It adds full-document search, outlines and versioned bookmarks, cached paragraph translations in the original PDF, explicit selection translation, and figure/table/formula enlargement. No OCR or model request is triggered by searching or reading cached results. See [reading tools and limits](docs/development/reading-tools.md). That release uses Web 1.4.0 with Workers 1.2.0.
 
+Web 1.7.0 is published and deployed; the release record includes verified image digests and acceptance results.
+
 1.7.0 adds stable research topics, automatic local organization, multi-topic and descendant browsing, protected manual corrections, logical import associations and cross-page batch editing. Topics combine with keyword filters, favorites and Reading List; files stay in place. See [topic usage and limits](docs/development/topics.md) and [release status](docs/releases/v1.7.0.md). Only Web changes; both Workers remain on verified 1.2.0 digests. Metadata, keyword tags, dual translations and reading tools remain available.
 
 Local classification uses adopted metadata and existing original text. It does not call models, MinerU, OCR or bibliographic services. Unsupported directions remain unorganized or can be maintained manually.
