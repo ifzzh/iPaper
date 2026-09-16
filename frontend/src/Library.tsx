@@ -20,7 +20,6 @@ import {
   Folder,
   Plus,
   Search,
-  Upload,
   RefreshCw,
   BookOpen,
   ChevronRight,
@@ -334,19 +333,36 @@ export function Library({
               onChange={(e) => setQuery(e.target.value)}
             />
           </label>
-          <button className="primary" onClick={onImport}>
-            <Upload size={16} />
-            <span>导入文献</span>
-          </button>
           <button
             className="icon-button"
             aria-label="刷新文献"
+            title="刷新文献"
             onClick={onChanged}
           >
             <RefreshCw size={17} />
           </button>
         </div>
-        <div className="keyword-filter-bar">
+        <div className="keyword-filter-bar" aria-label="筛选条件">
+          {filter !== "all" && (
+            <button
+              className="filter-chip"
+              title="移除范围筛选"
+              onClick={() => setFilter("all")}
+            >
+              {filter === "favorites" ? "收藏" : "Reading List"}
+              <X size={12} />
+            </button>
+          )}
+          {topicFilter !== "all" && (
+            <button
+              className="filter-chip"
+              title="移除主题筛选"
+              onClick={() => chooseTopics("all")}
+            >
+              {topicTitle || (topicFilter === "unorganized" ? "待整理" : "研究主题")}
+              <X size={12} />
+            </button>
+          )}
           <Tags size={15} />
           <select
             aria-label="按关键词筛选"
@@ -387,6 +403,18 @@ export function Library({
                 清除标签
               </button>
             </>
+          )}
+          {(filter !== "all" || topicFilter !== "all" || tagIds.length > 0) && (
+            <button
+              className="text-button"
+              onClick={() => {
+                setFilter("all");
+                chooseTopics("all");
+                setTagIds([]);
+              }}
+            >
+              清除全部
+            </button>
           )}
           <button className="text-button" onClick={() => setAction("tags")}>
             管理标签
@@ -514,7 +542,7 @@ export function Library({
               <div className="paper-row-main">
                 <div className="paper-title">
                   {p.starred && <Star size={13} className="starred" />}
-                  <h3>{p.title}</h3>
+                  <h3 title={p.title}>{p.title}</h3>
                 </div>
                 <p>{p.authors || "作者信息待补充"}</p>
                 <TagChips tags={p.tags || []} onSelect={addFilter} compact />
