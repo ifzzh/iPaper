@@ -22,9 +22,9 @@ A version number or screen on the development branch does not establish release 
 
 [Release 1.4.0](https://github.com/ifzzh/iPaper/releases/tag/v1.4.0) is deployed and verified. It adds full-document search, outlines and versioned bookmarks, cached paragraph translations in the original PDF, explicit selection translation, and figure/table/formula enlargement. No OCR or model request is triggered by searching or reading cached results. See [reading tools and limits](docs/development/reading-tools.md). That release uses Web 1.4.0 with Workers 1.2.0.
 
-1.6.0 adds independent keyword tags: background local extraction after admission, protected manual corrections and exclusions, aliases/rename/merge, AND/OR filtering, and consistent server pagination with frozen cross-page batches. Model enhancement requires an explicit action; default organization calls no model, MinerU, OCR or bibliographic service. See [keyword usage and limits](docs/development/keywords.md) and [release status and digests](docs/releases/v1.6.0.md). Only Web changes; Workers 1.2.0 remain compatible. Existing [metadata enrichment](docs/development/metadata.md), dual translations and reading tools remain available.
+1.7.0 adds stable research topics, automatic local organization, multi-topic and descendant browsing, protected manual corrections, logical import associations and cross-page batch editing. Topics combine with keyword filters, favorites and Reading List; files stay in place. See [topic usage and limits](docs/development/topics.md) and [release status](docs/releases/v1.7.0.md). Only Web changes; both Workers remain on verified 1.2.0 digests. Metadata, keyword tags, dual translations and reading tools remain available.
 
-Deployment and restart acceptance for 1.6.0 are complete; the published Web digest and unchanged Worker digests are recorded in the release notes. Local extraction was validated on existing admitted papers without provider calls. Optional model enhancement was tested with an isolated fake supplier; no new paid-model acceptance was performed.
+Local classification uses adopted metadata and existing original text. It does not call models, MinerU, OCR or bibliographic services. Unsupported directions remain unorganized or can be maintained manually.
 
 ## Capabilities and direction
 
