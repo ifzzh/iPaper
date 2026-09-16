@@ -594,6 +594,12 @@ def register_daily_arxiv_routes(
         """Will arXiv Add paper to library"""
         try:
             data = request.json or {}
+            from ipaper.topics.admission import validated_ids
+            from ipaper.topics.store import TopicError
+            try:
+                topic_ids = validated_ids(data.get('topicIds'))
+            except TopicError as error:
+                return jsonify(error=error.code), error.status
             arxiv_id = data.get("arxiv_id")
             category_id = data.get("category_id")
             date_str = data.get("date", get_today_arxiv_date())
@@ -658,6 +664,12 @@ def register_daily_arxiv_routes(
                     print(f"Failed to find existing papers: {e}")
 
                 if existing_paper:
+                    if topic_ids:
+                        from ipaper.database.connection import get_db
+                        from ipaper.topics.admission import apply_admission
+                        db = get_db()
+                        with db:
+                            apply_admission(db, current_user_id(), {'id': existing_paper.id, '_topic_ids': topic_ids})
                     # Make sure the paper is registered under the specified category
                     paper_store.upsert(
                         existing_paper,
@@ -731,6 +743,7 @@ def register_daily_arxiv_routes(
 
             # Save before publishing the in-memory entry.
             paper.extra["category_id"] = category_id
+            paper.extra["_topic_ids"] = topic_ids
             save_paper_metadata(target_path, paper)
 
             # Register to paper_store

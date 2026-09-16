@@ -211,6 +211,8 @@ class ProcessingStore:
                            (encoded(manifest), total, len(entries), now(), result_id, self.owner))
                 from ipaper.keywords.store import queue_change
                 queue_change(db,self.owner,result['paper_id'])
+                from ipaper.topics.store import queue_change as queue_topics
+                queue_topics(db,self.owner,result['paper_id'])
         except BaseException:
             # Only this unpublished UUID tree can be removed; never old results.
             if published:

@@ -276,105 +276,10 @@ def register_paper_operation_routes(
 
     @app.route("/api/paper/<paper_id>/move", methods=["PUT"])
     def api_move_paper(paper_id: str):
-        data = request.json or {}
-        target_category_id = data.get("target_category_id")
-
-        if not target_category_id:
-            return (
-                jsonify({"success": False, "error": "Target category ID is required"}),
-                400,
-            )
-
-        categories = get_categories()
-        result = find_paper(paper_id)
-        if not result:
-            return jsonify({"success": False, "error": "Paper not found"}), 404
-
-        paper_obj, _, source_category_id = result
-
-        target_category = find_category_node(categories, target_category_id)
-        if not target_category:
-            return (
-                jsonify({"success": False, "error": "Target category not found"}),
-                404,
-            )
-
-        target_path = get_category_path(categories, target_category_id)
-        if not target_path:
-            return (
-                jsonify({"success": False, "error": "Target category path not found"}),
-                404,
-            )
-
-        try:
-            source_file_path = resolve_paper_file(paper_obj, source_category_id)
-            source_assets = paper_asset_paths(upload_folder, source_file_path)
-
-            target_file_path = str(
-                paper_path(
-                    upload_folder,
-                    target_category_id,
-                    paper_obj.filename,
-                    create_parent=True,
-                )
-            )
-            counter = 1
-            original_filename = paper_obj.filename
-            while os.path.exists(target_file_path):
-                name, ext = os.path.splitext(original_filename)
-                new_filename = f"{name}_{counter}{ext}"
-                target_file_path = str(
-                    paper_path(upload_folder, target_category_id, new_filename)
-                )
-                counter += 1
-
-            target_assets = paper_asset_paths(upload_folder, target_file_path)
-
-            move_asset_bundle(source_assets, target_assets)
-
-            paper_obj.chinese_version_path = (
-                str(target_assets.chinese_dual)
-                if target_assets.chinese_dual.exists()
-                else None
-            )
-            paper_obj.analysis_result_path = (
-                str(target_assets.analysis_result)
-                if target_assets.analysis_result.exists()
-                else None
-            )
-
-            # renewPaperBasic information about the object
-            paper_obj.filename = os.path.basename(target_file_path)
-            paper_obj.file_path = target_file_path
-
-            # First update the category information in paper_store
-            # so that the search index sees the latest category when saving metadata.
-            paper_store.update_category(
-                paper_id,
-                category_id=target_category_id,
-                category_path=target_path,
-            )
-
-            # Save updated metadata and update search index (with the new category)
-            save_paper_metadata(target_file_path, paper_obj)
-
-            return jsonify(
-                {
-                    "success": True,
-                    "paper": paper_obj.to_dict(),
-                    "source_category": source_category_id,
-                    "target_category": target_category_id,
-                }
-            )
-
-        except PathSecurityError:
-            return unsafe_stored_path_response()
-        except Exception as exc:  # noqa: BLE001
-            print(f"Failed to move paper: {exc}")
-            return (
-                jsonify({"success": False, "error": f"Failed to move file: {exc}"}),
-                500,
-            )
+        from ipaper.database.dao.paper_dao import PaperDAO
+        if not PaperDAO.get_paper(paper_id):
+            return jsonify(error="paper_not_found"), 404
+        return jsonify(error="physical_category_move_retired", message="请使用研究主题加入或移出论文；文件位置保持不变。"), 410
 
     @app.route("/api/paper/<paper_id>/file")
     def api_get_paper_file(paper_id: str):

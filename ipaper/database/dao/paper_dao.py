@@ -183,6 +183,10 @@ class PaperDAO:
             for table in ('keyword_links','keyword_exclusions','keyword_papers','keyword_pending'):
                 db.execute(f'DELETE FROM {table} WHERE owner_id=? AND paper_id=?',(owner,paper_id))
             db.execute("UPDATE keyword_items SET status='deleted',error='paper_not_found' WHERE owner_id=? AND paper_id=? AND status IN ('queued','running')",(owner,paper_id))
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='topic_nodes'").fetchone():
+            for table in ('topic_links','topic_exclusions','topic_papers','topic_pending','topic_legacy_observed','topic_observed'):
+                db.execute(f'DELETE FROM {table} WHERE owner_id=? AND paper_id=?',(owner,paper_id))
+            db.execute("UPDATE topic_items SET status='deleted',error='paper_not_found' WHERE owner_id=? AND paper_id=? AND status IN ('queued','running')",(owner,paper_id))
         db.commit()
 
     @staticmethod

@@ -87,7 +87,7 @@ class TestCategoryStorage(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["category"]["name"], "New Category")
 
-    def test_delete_removes_only_exact_id_directory(self):
+    def test_retired_delete_keeps_all_assets_and_tree(self):
         target = category_directory(self.root, "category-a", create=True)
         sibling = category_directory(self.root, "category-b", create=True)
         (target / "paper.pdf").write_bytes(b"target")
@@ -95,9 +95,11 @@ class TestCategoryStorage(unittest.TestCase):
 
         response = self.client.delete("/api/categories/category-a")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(target.exists())
-        self.assertTrue((sibling / "paper.pdf").exists())
+        self.assertEqual(response.status_code, 410)
+        self.assertEqual(response.get_json()["error"], "physical_category_delete_retired")
+        self.assertEqual((target / "paper.pdf").read_bytes(), b"target")
+        self.assertEqual((sibling / "paper.pdf").read_bytes(), b"sibling")
+        self.assertEqual(self.saved, [])
 
     def test_delete_rejects_symlink_without_mutating_tree(self):
         original = deepcopy(self.categories)
@@ -107,7 +109,7 @@ class TestCategoryStorage(unittest.TestCase):
         (target / "link").symlink_to(outside)
         try:
             response = self.client.delete("/api/categories/category-a")
-            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.status_code, 410)
             self.assertEqual(self.categories, original)
             self.assertTrue(outside.exists())
         finally:

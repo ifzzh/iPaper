@@ -31,6 +31,8 @@ def _save_head(db, owner, paper_id, fields, provenance, revision, original_title
     db.execute('INSERT INTO metadata_index_events(owner_id,paper_id,revision) VALUES (?,?,?) ON CONFLICT(owner_id,paper_id) DO UPDATE SET revision=excluded.revision,attempts=0', (owner,paper_id,revision))
     from ipaper.keywords.store import queue_change
     queue_change(db,owner,paper_id)
+    from ipaper.topics.store import queue_change as queue_topics
+    queue_topics(db,owner,paper_id)
 
 
 def ensure_head(db, owner, paper, *, initial=False):
@@ -71,6 +73,10 @@ def after_save(db, owner, paper, *, new):
     if new and in_library(paper):
         from ipaper.keywords.store import queue_change
         queue_change(db,owner,paper['id'])
+        from ipaper.topics.store import queue_change as queue_topics
+        queue_topics(db,owner,paper['id'])
+        from ipaper.topics.admission import apply_admission
+        apply_admission(db,owner,paper)
 
 
 def cache_inspection(db,owner,paper_id,data):

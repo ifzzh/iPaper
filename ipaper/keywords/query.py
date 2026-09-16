@@ -14,6 +14,8 @@ def normalize(query):
         "scope",
         "query",
         "categoryIds",
+        "topicIds",
+        "unorganized",
         "tagIds",
         "tagMode",
         "order",
@@ -23,6 +25,8 @@ def normalize(query):
         "scope": query.get("scope", "all"),
         "query": query.get("query", ""),
         "categoryIds": query.get("categoryIds", []),
+        "topicIds": query.get("topicIds", []),
+        "unorganized": query.get("unorganized", False),
         "tagIds": query.get("tagIds", []),
         "tagMode": query.get("tagMode", "all"),
         "order": query.get("order", "recent"),
@@ -35,7 +39,9 @@ def normalize(query):
         raise KeywordError("invalid_library_query")
     if not isinstance(out["query"], str) or len(out["query"]) > 500:
         raise KeywordError("invalid_library_query")
-    for key, maximum in [("categoryIds", 1000), ("tagIds", 64)]:
+    if type(out["unorganized"]) is not bool:
+        raise KeywordError("invalid_library_query")
+    for key, maximum in [("categoryIds", 1000), ("topicIds", 64), ("tagIds", 64)]:
         if (
             not isinstance(out[key], list)
             or len(out[key]) > maximum
@@ -67,6 +73,23 @@ def members(db, owner, query, resolve=None):
             "SELECT paper_id,tag_id FROM keyword_links WHERE owner_id=?", (owner,)
         ):
             links.setdefault(row[0], set()).add(row[1])
+    topic_members = None
+    organized = set()
+    if q["topicIds"] or q["unorganized"]:
+        from ipaper.topics.store import member_ids, TopicError
+
+        try:
+            if q["topicIds"]:
+                topic_members = member_ids(db, owner, q["topicIds"])
+            organized = {
+                r[0]
+                for r in db.execute(
+                    "SELECT DISTINCT l.paper_id FROM topic_links l JOIN topic_nodes n ON n.id=l.topic_id AND n.owner_id=l.owner_id WHERE l.owner_id=? AND n.status='active'",
+                    (owner,),
+                )
+            }
+        except TopicError as error:
+            raise KeywordError(error.code, error.status) from None
     directories = {category_storage_id(c) for c in q["categoryIds"]}
     text = q["query"].strip().casefold()
     result = []
@@ -75,6 +98,10 @@ def members(db, owner, query, resolve=None):
     for row in db.execute("SELECT * FROM papers WHERE owner_id=?", (owner,)):
         p = unpack(row)
         if not in_library(p):
+            continue
+        if topic_members is not None and p["id"] not in topic_members:
+            continue
+        if q["unorganized"] and p["id"] in organized:
             continue
         if q["scope"] == "favorites" and not p.get("starred"):
             continue

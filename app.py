@@ -187,6 +187,11 @@ def _rate_limit_response(bucket: str, identity: str, limit: int, window: int):
 
 def _sensitive_rate_policy():
     path = request.path
+    if request.endpoint and request.endpoint.startswith("topics."):
+        if request.endpoint == "topics.create_job":
+            return "topic_jobs", 60, 3600
+        if request.method in {"POST", "PATCH", "PUT", "DELETE"}:
+            return "topic_edits", 180, 60
     if request.endpoint and request.endpoint.startswith("keywords."):
         if request.endpoint == "keywords.create":
             return "keyword_jobs", 60, 3600
@@ -1044,11 +1049,16 @@ def register_routes():
     from ipaper.keywords.routes import register_keyword_routes
     keyword_service = KeywordService(DB_PATH, processing_service)
     register_keyword_routes(app, keyword_service)
+    from ipaper.topics.service import TopicService
+    from ipaper.topics.routes import register_topic_routes
+    topic_service = TopicService(DB_PATH, processing_service)
+    register_topic_routes(app, topic_service)
     processing_service.initialize_ifzzh()
     if app.config.get("IPAPER_START_BACKGROUND_TASKS", False):
         processing_service.start()
         metadata_service.start()
         keyword_service.start()
+        topic_service.start()
 
     register_settings_routes(
         app,
@@ -1308,6 +1318,9 @@ def _initialize_application(papers_dir: str) -> None:
 
     # Paper data is now directly stored in the JSON file next to the PDF file
 def shutdown_application() -> None:
+    topic_service = app.extensions.get('topics')
+    if topic_service:
+        topic_service.shutdown()
     keyword_service = app.extensions.get('keywords')
     if keyword_service:
         keyword_service.shutdown()

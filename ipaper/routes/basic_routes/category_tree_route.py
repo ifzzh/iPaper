@@ -175,75 +175,9 @@ def register_category_routes(
     @app.route("/api/categories/<category_id>", methods=["DELETE"])
     def api_delete_category(category_id):
         categories = get_categories()
-        unsafe_storage = False
-
-        def collect_all_category_ids(node: Dict[str, Any]) -> List[str]:
-            """Recursively collect a category and all its subcategories ID"""
-            ids = [node.get("id")]
-            for child in node.get("children", []):
-                ids.extend(collect_all_category_ids(child))
-            return ids
-
-        def delete_papers_in_categories(category_ids: List[str]) -> int:
-            """from paper_store Delete all papers under the specified category"""
-            deleted_count = 0
-            for cat_id in category_ids:
-                papers = paper_store.list_by_category(cat_id)
-                for paper in papers:
-                    paper_id = paper.id if hasattr(paper, "id") else paper.get("id")
-                    if paper_id:
-                        paper_store.remove(paper_id)
-                        deleted_count += 1
-            return deleted_count
-
-        def delete_category_recursive(node: Dict[str, Any], target_id: str) -> bool:
-            nonlocal unsafe_storage
-            children = node.get("children", [])
-            for index, child in enumerate(children):
-                if child["id"] == target_id:
-                    # 1. Collect all categories to be deleted ID(Includes subcategories)
-                    all_category_ids = collect_all_category_ids(child)
-
-                    # Validate every exact ID-backed directory before changing state.
-                    category_directories = []
-                    try:
-                        for cat_id in all_category_ids:
-                            folder = category_directory(upload_folder, cat_id)
-                            if folder.exists():
-                                category_directories.append(folder)
-                                # Validation only; deletion happens after all checks pass.
-                                for current_root, dirs, files in os.walk(folder):
-                                    for name in [*dirs, *files]:
-                                        if os.path.islink(os.path.join(current_root, name)):
-                                            raise PathSecurityError("symlink_in_tree")
-                    except PathSecurityError:
-                        unsafe_storage = True
-                        return False
-
-                    # 2. from paper_store Delete all related papers from
-                    deleted_papers = delete_papers_in_categories(all_category_ids)
-                    print(f"Already from paper_store delete {deleted_papers} papers")
-
-                    # 3. Delete only the exact ID-backed folders.
-                    for folder in reversed(category_directories):
-                        remove_confined_tree(upload_folder, folder)
-                        print("Category storage directory deleted")
-
-                    # 4. Remove node from classification tree
-                    del children[index]
-                    return True
-                if delete_category_recursive(child, target_id):
-                    return True
-            return False
-
-        if delete_category_recursive(categories, category_id):
-            save_categories(categories)
-            return jsonify({"success": True})
-
-        if unsafe_storage:
-            return jsonify({"success": False, "error": "unsafe_stored_path"}), 409
-
-        return jsonify({"success": False, "error": "Category not found"}), 404
+        if not find_category_node(categories, category_id):
+            return jsonify(error="category_not_found"), 404
+        return jsonify(error="physical_category_delete_retired", message="存储分类删除已停用；请在研究主题中管理归属，不会删除论文。"), 410
 
     @app.route("/api/categories/<category_id>/move", methods=["PUT"])
     def api_move_category(category_id):

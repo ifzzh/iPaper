@@ -81,6 +81,7 @@ def register_upload_from_pdf_routes(
         category_id: str,
         category_path: list[str],
         category_folder: str,
+        topic_ids: list[str],
     ) -> None:
         try:
             while True:
@@ -137,6 +138,7 @@ def register_upload_from_pdf_routes(
             })
             paper.extra["_metadata_inspection"] = result
             paper.extra["category_id"] = category_id
+            paper.extra["_topic_ids"] = topic_ids
             save_paper_metadata(str(target), paper)
             registered = paper_store.upsert(
                 paper, category_id=category_id, category_path=category_path
@@ -156,6 +158,12 @@ def register_upload_from_pdf_routes(
 
         file = request.files["file"]
         category_id = request.form.get("category_id")
+        from ipaper.topics.admission import validated_ids
+        from ipaper.topics.store import TopicError
+        try:
+            topic_ids = validated_ids(request.form.get("topicIds"))
+        except TopicError as error:
+            return jsonify(error=error.code), error.status
 
         if file.filename == "":
             return jsonify({"success": False, "error": "No file selected"})
@@ -209,6 +217,7 @@ def register_upload_from_pdf_routes(
             category_id,
             category_path,
             category_folder,
+            topic_ids,
         )
         return jsonify({"success": True, "task_id": task_id, "status": "queued"}), 202
 

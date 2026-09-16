@@ -133,6 +133,12 @@ def register_update_from_url_routes(
         """from arXiv URL Download and import PDF(quick return,DBLP background acquisition)"""
         try:
             data = request.json or {}
+            from ipaper.topics.admission import validated_ids
+            from ipaper.topics.store import TopicError
+            try:
+                topic_ids = validated_ids(data.get("topicIds"))
+            except TopicError as error:
+                return jsonify(error=error.code), error.status
             arxiv_url = data.get("arxiv_url", "").strip()
             category_id = data.get("category_id")
             use_temp_dir = data.get("use_temp_dir", False)  # Whether to use the temporary directory of the to-be-read list
@@ -267,6 +273,7 @@ def register_update_from_url_routes(
 
             paper.extra["_metadata_inspection"] = inspection
             paper.extra["category_id"] = category_id
+            paper.extra["_topic_ids"] = topic_ids
             save_paper_metadata(file_path, paper)
             registered_paper = paper_store.upsert(
                 paper, category_id=category_id, category_path=category_path

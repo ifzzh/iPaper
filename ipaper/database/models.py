@@ -290,3 +290,6 @@ from ipaper.metadata.schema import SCHEMA as METADATA_SCHEMA
 SCHEMA_SCRIPT += METADATA_SCHEMA
 from ipaper.keywords.schema import SCHEMA as KEYWORD_SCHEMA
 SCHEMA_SCRIPT += KEYWORD_SCHEMA
+
+from ipaper.topics.schema import SCHEMA as TOPIC_SCHEMA
+SCHEMA_SCRIPT += TOPIC_SCHEMA

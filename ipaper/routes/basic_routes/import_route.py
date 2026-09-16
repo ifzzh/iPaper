@@ -499,7 +499,7 @@ def register_import_routes(
                 task["last_update"] = datetime.now().isoformat()
 
     def _import_papers_task(
-        task_id: str, papers_data: List[Dict[str, Any]], target_category_id: str = ""
+        task_id: str, papers_data: List[Dict[str, Any]], target_category_id: str = "", topic_ids=None
     ):
         """Background import task
 
@@ -610,7 +610,9 @@ def register_import_routes(
                 # Find or create a category
                 # If a parent directory is specified, create a classification structure under the parent directory
                 categories = get_categories()
-                if parent_category_id:
+                if topic_ids is not None:
+                    category_id = "root"
+                elif parent_category_id:
                     category_id = _find_or_create_category_under_parent(
                         categories,
                         parent_category_id,
@@ -720,6 +722,8 @@ def register_import_routes(
                 )
 
                 new_paper.extra.update(_metadata_inspection=inspection, category_id=category_id)
+                if topic_ids is not None:
+                    new_paper.extra.update(_topic_ids=topic_ids, _topic_paths=[category_path])
                 save_paper_metadata(file_path, new_paper)
                 # Publish only after the paper and metadata task commit.
                 registered_paper = paper_store.upsert(
@@ -789,6 +793,12 @@ def register_import_routes(
         global current_import_task_id
         if "file" not in request.files:
             return jsonify({"success": False, "error": "No document provided"}), 400
+        from ipaper.topics.admission import validated_ids
+        from ipaper.topics.store import TopicError
+        try:
+            topic_ids = validated_ids(request.form.get('topicIds')) if 'topicIds' in request.form else None
+        except TopicError as error:
+            return jsonify(error=error.code), error.status
         file = request.files["file"]
         if file.filename == "":
             return jsonify({"success": False, "error": "No file selected"}), 400
@@ -838,14 +848,14 @@ def register_import_routes(
                 "start_time": datetime.now().isoformat(),
                 "last_update": datetime.now().isoformat(), "cancelled": False,
             }
-        if not _enqueue_import(_validate_rdf_then_import, task_id, target_category_id):
+        if not _enqueue_import(_validate_rdf_then_import, task_id, target_category_id, topic_ids):
             return jsonify(success=False, error="import_queue_full"), 429
         return jsonify({
             "success": True, "task_id": task_id, "total_papers": 0,
             "message": "RDF queued for security validation",
         }), 202
 
-    def _validate_rdf_then_import(task_id: str, target_category_id: str) -> None:
+    def _validate_rdf_then_import(task_id: str, target_category_id: str, topic_ids=None) -> None:
         global current_import_task_id
         try:
             state = document_client.wait(task_id, timeout=120)
@@ -873,7 +883,7 @@ def register_import_routes(
                 original_total=len(papers_data), already_imported_count=imported_count,
                 message="RDF validated; importing papers...",
             )
-            _import_papers_task(task_id, remaining, target_category_id)
+            _import_papers_task(task_id, remaining, target_category_id, topic_ids)
         except (DocumentWorkerRejected, DocumentWorkerUnavailable) as exc:
             reason = getattr(exc, "reason", "document_worker_unavailable")
             DocumentJobDAO.update(task_id, "failed", error=reason)
@@ -1027,6 +1037,12 @@ def register_import_routes(
         global current_import_task_id
         if "file" not in request.files:
             return jsonify({"success": False, "error": "No document provided"}), 400
+        from ipaper.topics.admission import validated_ids
+        from ipaper.topics.store import TopicError
+        try:
+            topic_ids = validated_ids(request.form.get('topicIds')) if 'topicIds' in request.form else None
+        except TopicError as error:
+            return jsonify(error=error.code), error.status
         file = request.files["file"]
         if not file or file.filename == "":
             return jsonify({"success": False, "error": "No file selected"}), 400
@@ -1079,7 +1095,7 @@ def register_import_routes(
                 "last_update": datetime.now().isoformat(),
                 "cancelled": False,
             }
-        if not _enqueue_import(_validate_export_then_rebuild, task_id):
+        if not _enqueue_import(_validate_export_then_rebuild, task_id, topic_ids):
             return jsonify(success=False, error="import_queue_full"), 429
         return jsonify({
             "success": True,
@@ -1088,7 +1104,7 @@ def register_import_routes(
             "message": "Archive queued for security validation",
         }), 202
 
-    def _validate_export_then_rebuild(task_id: str) -> None:
+    def _validate_export_then_rebuild(task_id: str, topic_ids=None) -> None:
         global current_import_task_id
         try:
             state = document_client.wait(task_id, timeout=300)
@@ -1120,7 +1136,7 @@ def register_import_routes(
                 total=len(paper_entries),
                 message="Archive validated; importing metadata...",
             )
-            _rebuild_papers_from_json(task_id, str(papers_folder))
+            _rebuild_papers_from_json(task_id, str(papers_folder), topic_ids)
         except (DocumentWorkerRejected, DocumentWorkerUnavailable) as exc:
             reason = getattr(exc, "reason", "document_worker_unavailable")
             DocumentJobDAO.update(task_id, "failed", error=reason)
@@ -1139,6 +1155,7 @@ def register_import_routes(
     def _rebuild_papers_from_json(
         task_id: str,
         papers_folder: str,
+        topic_ids=None,
     ):
         """Rebuild papers only from Worker-validated metadata JSON files."""
         global current_import_task_id
@@ -1266,7 +1283,7 @@ def register_import_routes(
                     category_path_parts = rel_dir.split(os.sep) if rel_dir != "." else []
                     category_id = "root"
                     category_path = ["root"]
-                    if category_path_parts:
+                    if category_path_parts and topic_ids is None:
                         category_id = _find_or_create_category(
                             get_categories(), category_path_parts, save_categories, create_category_folder
                         )
@@ -1328,6 +1345,8 @@ def register_import_routes(
                     )
 
                     new_paper.extra.update(_metadata_inspection=inspection, category_id=category_id)
+                    if topic_ids is not None:
+                        new_paper.extra.update(_topic_ids=topic_ids, _topic_paths=[category_path_parts])
                     save_paper_metadata(pdf_path, new_paper)
                     registered = paper_store.upsert(
                         new_paper, category_id=category_id, category_path=category_path
