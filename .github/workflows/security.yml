@@ -3,7 +3,7 @@ name: Security gate
 on:
   pull_request:
   push:
-    branches: [dev, main, personal-paper-reading]
+    branches: [dev, main]
 
 permissions:
   contents: read
@@ -46,11 +46,8 @@ jobs:
           ./scripts/security_scan.sh filesystem
           ./scripts/security_scan.sh images
 
-      - name: Upload reports and SBOMs
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: ipaper-security-${{ github.sha }}
-          path: /tmp/ipaper-security
-          if-no-files-found: error
-          retention-days: 30
+      # The scans above are the release gate and the CycloneDX SBOM generation
+      # still runs inside `security_scan.sh images`. Raw Trivy/pip-audit JSON and
+      # SBOM files are complete release evidence: they stay on the runner and are
+      # archived to the private local evidence directory by the release task.
+      # They are deliberately not uploaded as a public Actions artifact.
