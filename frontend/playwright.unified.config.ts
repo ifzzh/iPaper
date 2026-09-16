@@ -12,7 +12,10 @@ export default defineConfig({
   ],
   use: {
     ...base.use,
-    launchOptions: { executablePath: "/opt/microsoft/msedge/msedge" },
+    launchOptions: {
+      ...(base.use as { launchOptions?: object }).launchOptions,
+      executablePath: "/opt/microsoft/msedge/msedge",
+    },
   },
   webServer: {
     ...(base.webServer as object),

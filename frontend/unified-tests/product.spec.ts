@@ -18,13 +18,17 @@ test("unified login, cold library, categories, preferences and feature pages", a
   await expect(page.locator(".paper-details")).toContainText(
     "Learning to read",
   );
-  await page.getByLabel("新建分类", { exact: true }).click();
-  await page.getByRole("dialog").getByRole("textbox").fill("隔离验收分类");
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "创建", exact: true })
+  await page.getByLabel("管理主题", { exact: true }).first().click();
+  const manager = page.getByRole("dialog");
+  await manager.getByLabel("名称", { exact: true }).fill("隔离验收主题");
+  await manager
+    .getByRole("button", { name: "创建主题", exact: true })
     .click();
-  await expect(page.locator(".category-tree")).toContainText("隔离验收分类");
+  await expect(
+    manager.getByRole("combobox", { name: "主题", exact: true }),
+  ).toContainText("隔离验收主题");
+  await manager.getByLabel("关闭", { exact: true }).click();
+  await expect(page.locator(".category-tree")).toContainText("隔离验收主题");
   for (const label of ["Daily arXiv", "任务中心", "设置"]) {
     await page
       .getByRole("navigation")
