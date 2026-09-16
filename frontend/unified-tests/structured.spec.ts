@@ -145,7 +145,7 @@ test("dual translation source workflow with isolated fake suppliers", async ({
         page.getByRole("button", { name: "生成翻译", exact: true }),
       ).toHaveCSS(
         "background-color",
-        theme === "dark" ? "rgb(27, 35, 32)" : "rgb(255, 255, 255)",
+        theme === "dark" ? "rgb(30, 30, 34)" : "rgb(255, 255, 255)",
       );
       await page
         .locator(".structure-scroll")
