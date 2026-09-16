@@ -122,7 +122,7 @@ export function TopicBatchDialog({ selection, onClose, onChanged }: { selection:
       else {
         const payload = {paperIds: preview.paperIds, revisions: preview.revisions, action, topicId};
         const key = JSON.stringify(payload);
-        if(attempt.current?.key !== key) attempt.current = {key, requestId: crypto.randomUUID()};
+        if(attempt.current?.key !== key) attempt.current = {key, requestId: Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2,"0")).join("")};
         await api("/api/topics/batch", "POST", {...payload, requestId: attempt.current.requestId});
         setMessage("已保存 " + preview.count + " 篇论文的主题调整。");
         await refreshPreview();
