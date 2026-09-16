@@ -2194,3 +2194,12 @@ progress {
     display: none;
   }
 }
+
+/* Logical topic navigation shares the library's compact visual hierarchy. */
+.topic-row { min-width: 0; gap: 3px; }
+.topic-row > input[type="checkbox"] { flex: 0 0 14px; width: 14px; height: 14px; margin: 0 2px; }
+.topic-row > button:last-child { background: transparent; border: 0; flex: 1; justify-content: flex-start; min-width: 0; padding: 9px 5px; font-size: 12px; color: inherit; }
+.topic-row > button:last-child span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; text-align: left; }
+.topic-row > button:last-child small { flex: 0 0 auto; }
+.topic-row > .topic-collapse:first-child { flex: 0 0 18px; padding: 7px 2px; width: 18px; }
+.category-tree .topic-row:hover { background: var(--accent-bg); }

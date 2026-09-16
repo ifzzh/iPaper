@@ -88,6 +88,7 @@ export function Daily({
         date,
         fetch_category: p.fetch_category || p.category || category,
         use_temp_dir: true,
+        topicIds: [],
       });
       onChanged();
       papers.refresh();

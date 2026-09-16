@@ -1,3 +1,4 @@
+import { TopicSidebar, TopicManager, PaperTopics, TopicBatchDialog } from "./Topics";
 import {
   TagChips,
   PaperKeywords,
@@ -141,13 +142,27 @@ export function Library({
     [action, setAction] = useState(""),
     [failure, setFailure] = useState(""),
     [busy, setBusy] = useState(false),
-    [category, setCategory] = useState<Category | null>(null),
     [checked, setChecked] = useState<string[]>([]),
     [metadataRevision, setMetadataRevision] = useState(0),
     [metadataSelection, setMetadataSelection] = useState<Record<
       string,
       unknown
     > | null>(null);
+  const [topicRevision, setTopicRevision] = useState(0);
+  const [mobileTopics, setMobileTopics] = useState(false);
+  const [topicFilter, setTopicFilter] = useState<string>(preferences.topicFilter || 'all');
+  useEffect(() => {if(preferences.topicFilter) setTopicFilter(preferences.topicFilter);}, [preferences.topicFilter]);
+  function chooseTopics(value: string) {
+    setTopicFilter(value);
+    onPreferences({topicFilter: value});
+  }
+  const topicCatalog = useResource<{topics: {id: string; name: string}[]; legacyMapping: Record<string,string>}>("/api/topics", {topics: [], legacyMapping: {}});
+  useEffect(() => {
+    if (filter === 'root') setFilter('all');
+    else if(filter.startsWith('topic:') || filter === 'unorganized') { chooseTopics(filter); setFilter('all'); }
+    else if(topicCatalog.data.legacyMapping?.[filter]) { chooseTopics('topic:' + topicCatalog.data.legacyMapping[filter]); setFilter('all'); }
+  }, [filter, topicCatalog.data]);
+  const [topicSelection, setTopicSelection] = useState<Record<string, unknown> | null>(null);
   const [tagIds, setTagIds] = useState<string[]>([]),
     [tagMode, setTagMode] = useState("all"),
     [keywordSelection, setKeywordSelection] = useState<Record<
@@ -173,24 +188,17 @@ export function Library({
     });
   }, [catalog.data]);
   const reading = useResource<any[]>("/api/reading-list", []);
-  const categoryIds = useMemo(() => {
-    const find = (node: Category): Category | undefined =>
-      node.id === filter ? node : (node.children || []).map(find).find(Boolean);
-    const node = find(tree);
-    return node ? flattenCategories(node).map((x) => x.category.id) : [filter];
-  }, [tree, filter]);
   const criteria = useMemo(
     () => ({
-      scope: ["all", "favorites", "reading"].includes(filter)
-        ? filter
-        : "categories",
+      scope: ["all", "favorites", "reading"].includes(filter) ? filter : "all",
+      topicIds: topicFilter.startsWith("topic:") ? topicFilter.slice(6).split(",").filter(Boolean) : [],
+      unorganized: topicFilter === "unorganized",
       query,
-      categoryIds,
       tagIds,
       tagMode,
       order,
     }),
-    [filter, query, categoryIds, tagIds, tagMode, order],
+    [filter, topicFilter, query, tagIds, tagMode, order],
   );
   const list = useResource<any>(
     "/api/library/papers?filter=" +
@@ -224,7 +232,7 @@ export function Library({
     setPage(1);
     setChecked([]);
     setSelectionId("");
-  }, [filter, query, tagIds, tagMode, order]);
+  }, [filter, topicFilter, query, tagIds, tagMode, order]);
   useEffect(() => {
     list.refresh();
     catalog.refresh();
@@ -256,15 +264,9 @@ export function Library({
       setBusy(false);
     }
   }
-  const title =
-    filter === "all"
-      ? "全部文献"
-      : filter === "favorites"
-        ? "收藏"
-        : filter === "reading"
-          ? "Reading List"
-          : flattenCategories(tree).find((x) => x.category.id === filter)
-              ?.category.name || "文献分类";
+  const scopeTitle = filter === 'favorites' ? '收藏' : filter === 'reading' ? 'Reading List' : '全部文献';
+  const topicTitle = topicFilter === 'unorganized' ? '待整理' : topicFilter.startsWith('topic:') ? topicFilter.slice(6).split(',').map(id => topicCatalog.data.topics.find(t => t.id === id)?.name || '主题').join('、') : '';
+  const title = topicTitle ? `${scopeTitle} · ${topicTitle}` : scopeTitle;
   return (
     <div
       ref={layout}
@@ -287,11 +289,10 @@ export function Library({
           </div>
           <button
             className="icon-button"
-            title="新建分类"
-            aria-label="新建分类"
+            title="管理主题"
+            aria-label="管理主题"
             onClick={() => {
-              setCategory(tree);
-              setAction("create-category");
+              setAction("topic-manager");
             }}
           >
             <Plus size={18} />
@@ -314,45 +315,7 @@ export function Library({
             </button>
           ))}
         </nav>
-        <div className="section-label">
-          分类{" "}
-          <button
-            className="icon-button"
-            aria-label="刷新分类"
-            onClick={refreshTree}
-          >
-            <RefreshCw size={13} />
-          </button>
-        </div>
-        <nav className="category-tree">
-          {flattenCategories(tree).map(({ category: c, depth }) => (
-            <div
-              className={
-                "category-row depth-" +
-                Math.min(depth, 4) +
-                (filter === c.id ? " active" : "")
-              }
-              key={c.id}
-            >
-              <button onClick={() => setFilter(c.id)}>
-                <Folder size={16} />
-                <span>
-                  {c.id === "root" ? "未分类" : c.display_name || c.name}
-                </span>
-              </button>
-              <button
-                className="icon-button"
-                aria-label={"管理分类 " + c.name}
-                onClick={() => {
-                  setCategory(c);
-                  setAction("category");
-                }}
-              >
-                <MoreHorizontal size={15} />
-              </button>
-            </div>
-          ))}
-        </nav>
+        <TopicSidebar filter={topicFilter} onFilter={chooseTopics} changed={topicRevision} collapsed={preferences.topicCollapsed || []} onCollapsed={ids=>onPreferences({topicCollapsed:ids})}/>
         <div className="sidebar-foot">
           <BookOpen size={17} />
           <div>
@@ -430,17 +393,8 @@ export function Library({
           </button>
         </div>
         <div className="list-meta">
-          <select
-            className="mobile-only"
-            aria-label="筛选分类"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          >
-            <option value="all">全部文献</option>
-            <option value="favorites">收藏</option>
-            <option value="reading">Reading List</option>
-            <CategoryOptions tree={tree} />
-          </select>
+          <button className="mobile-only" onClick={() => setMobileTopics(true)}>筛选研究主题</button>
+          {mobileTopics && <Modal title="文献筛选" onClose={() => setMobileTopics(false)}><div className="actions">{[['all','全部文献'],['favorites','收藏'],['reading','Reading List']].map(([id,name]) => <button key={id} onClick={() => setFilter(id)}>{name}</button>)}</div><TopicSidebar filter={topicFilter} onFilter={chooseTopics} changed={topicRevision} collapsed={preferences.topicCollapsed || []} onCollapsed={ids=>onPreferences({topicCollapsed:ids})}/><button onClick={() => setMobileTopics(false)}>查看结果</button></Modal>}
           <span>
             {title} <strong>{total}</strong>
           </span>
@@ -483,7 +437,7 @@ export function Library({
             >
               选择全部匹配（{total} 篇）
             </button>
-            <button onClick={() => setAction("bulk-move")}>移动</button>
+            <button onClick={() => setTopicSelection(selectionId ? {selectionId} : {paperIds: checked})}>整理论文主题</button>
             <button
               onClick={() =>
                 perform(async () => {
@@ -726,6 +680,7 @@ export function Library({
                 {paper.abstract || "暂无摘要，可在编辑元数据中补充。"}
               </p>
             </section>
+            <PaperTopics key={paper.id + ":topics"} paperId={paper.id} onChanged={() => {setTopicRevision(v => v + 1); list.refresh();}}/>
             <PaperKeywords
               key={paper.id + ":tags"}
               id={paper.id}
@@ -885,9 +840,9 @@ export function Library({
               <Pencil size={16} />
               编辑文献备注
             </button>
-            <button onClick={() => setAction("move")}>
+            <button onClick={() => {setAction(""); if(paper) setTopicSelection({paperIds: [paper.id]});}}>
               <FolderInput size={16} />
-              移动到分类
+              调整研究主题
             </button>
             <a
               href={"/api/paper/" + encodeURIComponent(paper.id) + "/file"}
@@ -913,63 +868,9 @@ export function Library({
           </div>
         </Modal>
       )}
-      {(action === "move" || action === "bulk-move") && (
-        <MoveDialog
-          tree={tree}
-          onClose={() => setAction("")}
-          onSave={(target) =>
-            perform(async () => {
-              for (const id of action === "bulk-move"
-                ? checked
-                : paper
-                  ? [paper.id]
-                  : [])
-                await api(
-                  "/api/paper/" + encodeURIComponent(id) + "/move",
-                  "PUT",
-                  { target_category_id: target },
-                );
-            })
-          }
-        />
-      )}
-      {category && ["category", "create-category"].includes(action) && (
-        <CategoryDialog
-          category={category}
-          tree={tree}
-          creating={action === "create-category"}
-          onClose={() => setAction("")}
-          onSaved={() => {
-            refreshTree();
-            onChanged();
-            setAction("");
-          }}
-        />
-      )}
+      {action === "topic-manager" && <TopicManager onClose={() => {setAction(""); setTopicRevision(v => v + 1); list.refresh();}}/>}
+      {topicSelection && <TopicBatchDialog selection={topicSelection} onClose={() => setTopicSelection(null)} onChanged={() => {setTopicRevision(v => v + 1); list.refresh();}}/>}
     </div>
-  );
-}
-function MoveDialog({
-  tree,
-  onClose,
-  onSave,
-}: {
-  tree: Category;
-  onClose: () => void;
-  onSave: (id: string) => Promise<unknown>;
-}) {
-  const [id, setId] = useState("root");
-  return (
-    <Modal title="移动到分类" onClose={onClose}>
-      <Field label="目标分类">
-        <select value={id} onChange={(e) => setId(e.target.value)}>
-          <CategoryOptions tree={tree} />
-        </select>
-      </Field>
-      <button className="primary" onClick={() => onSave(id)}>
-        移动
-      </button>
-    </Modal>
   );
 }
 function EditNotes({
@@ -1033,160 +934,6 @@ function EditNotes({
           </button>
         </footer>
       </form>
-    </Modal>
-  );
-}
-function CategoryDialog({
-  category,
-  tree,
-  creating,
-  onClose,
-  onSaved,
-}: {
-  category: Category;
-  tree: Category;
-  creating: boolean;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [name, setName] = useState(creating ? "" : category.name),
-    [parent, setParent] = useState(creating ? category.id : "root"),
-    [error, setError] = useState(""),
-    [confirm, setConfirm] = useState(false);
-  const [color, setColor] = useState(category.color || "#168272");
-  async function run(fn: () => Promise<unknown>) {
-    try {
-      await fn();
-      onSaved();
-    } catch (e) {
-      setError(errorText(e));
-    }
-  }
-  return (
-    <Modal title={creating ? "新建分类" : "管理分类"} onClose={onClose}>
-      <Field label="分类名称">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-        />
-      </Field>
-      <Field label="上级分类">
-        <select value={parent} onChange={(e) => setParent(e.target.value)}>
-          <CategoryOptions
-            tree={tree}
-            exclude={creating ? undefined : category.id}
-          />
-        </select>
-      </Field>
-      <Status error={error} />
-      {!creating && category.id !== "root" && (
-        <Field label="分类颜色">
-          <input
-            type="color"
-            value={/^#[0-9a-f]{6}$/i.test(color) ? color : "#168272"}
-            onChange={(e) => setColor(e.target.value)}
-          />
-          <button
-            onClick={() =>
-              run(() =>
-                api(
-                  "/api/categories/" +
-                    encodeURIComponent(category.id) +
-                    "/color",
-                  "PUT",
-                  { color },
-                ),
-              )
-            }
-          >
-            保存颜色
-          </button>
-        </Field>
-      )}
-      <div className="action-row">
-        <button
-          className="primary"
-          disabled={!creating && category.id === "root"}
-          onClick={() =>
-            run(() =>
-              api(
-                "/api/categories" +
-                  (creating ? "" : "/" + encodeURIComponent(category.id)),
-                creating ? "POST" : "PUT",
-                creating ? { name, parent_id: parent } : { name },
-              ),
-            )
-          }
-        >
-          {creating ? "创建" : "重命名"}
-        </button>
-        {!creating && category.id !== "root" && (
-          <>
-            <button
-              onClick={() =>
-                run(() =>
-                  api(
-                    "/api/categories/" +
-                      encodeURIComponent(category.id) +
-                      "/move",
-                    "PUT",
-                    { target_parent_id: parent },
-                  ),
-                )
-              }
-            >
-              移动
-            </button>
-            <button
-              onClick={() =>
-                run(() =>
-                  api(
-                    "/api/categories/" +
-                      encodeURIComponent(category.id) +
-                      "/pin",
-                    "PUT",
-                    { pinned: !category.pinned },
-                  ),
-                )
-              }
-            >
-              {category.pinned ? "取消置顶" : "置顶"}
-            </button>
-            <button className="danger" onClick={() => setConfirm(true)}>
-              删除
-            </button>
-          </>
-        )}
-      </div>
-      {!creating && (
-        <a
-          className="text-button"
-          href={
-            "/api/categories/" +
-            encodeURIComponent(category.id) +
-            "/export-bibtex"
-          }
-          download
-        >
-          导出 BibTeX
-        </a>
-      )}
-      {confirm && (
-        <Confirm
-          title="删除分类"
-          detail="分类中的文献可能一同被删除，请确认无需保留。"
-          onClose={() => setConfirm(false)}
-          onConfirm={() =>
-            run(() =>
-              api(
-                "/api/categories/" + encodeURIComponent(category.id),
-                "DELETE",
-              ),
-            )
-          }
-        />
-      )}
     </Modal>
   );
 }

@@ -1,3 +1,4 @@
+import { TopicTask, type Topic } from "./Topics";
 import { KeywordTask } from "./Keywords";
 import { MetadataTask } from "./Metadata";
 import { ProcessingTaskDetails, processingNames } from "./Processing";
@@ -30,10 +31,12 @@ export function ImportDialog({
 }) {
   const [kind, setKind] = useState("pdf"),
     [files, setFiles] = useState<File[]>([]),
-    [target, setTarget] = useState("reading_list_temp"),
+    [target, setTarget] = useState("root"),
     [url, setUrl] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const topicCatalog = useResource<{topics: Topic[]}>("/api/topics", {topics: []});
+  const [topicIds, setTopicIds] = useState<string[]>([]);
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -45,6 +48,7 @@ export function ImportDialog({
             ? url
             : "https://arxiv.org/abs/" + url,
           category_id: target,
+          topicIds,
           use_temp_dir: target === "reading_list_temp",
         });
         if (r.task_id)
@@ -53,6 +57,7 @@ export function ImportDialog({
         for (const file of files) {
           const data = new FormData();
           data.set("file", file);
+          data.set("topicIds", JSON.stringify(topicIds));
           data.set(
             kind === "zotero" ? "target_category_id" : "category_id",
             target,
@@ -153,16 +158,8 @@ export function ImportDialog({
             ))}
           </ul>
         )}
-        {kind !== "backup" && (
-          <Field label="存入">
-            <select value={target} onChange={(e) => setTarget(e.target.value)}>
-              {kind !== "zotero" && (
-                <option value="reading_list_temp">Reading List</option>
-              )}
-              <CategoryOptions tree={tree} />
-            </select>
-          </Field>
-        )}
+        <Field label="加入研究主题（可多选）"><select multiple aria-label="导入主题" value={topicIds} onChange={e => setTopicIds(Array.from(e.target.selectedOptions, o => o.value))}>{topicCatalog.data.topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></Field>
+        <p className="muted">未选择时按内容后台整理；主题不改变文件存储位置。导入中的原分类会保留为逻辑主题。</p>
         {kind === "backup" && (
           <p className="muted">
             按备份中的分类结构恢复元数据；不会搬入备份中的服务器路径。
@@ -211,6 +208,7 @@ export function Tasks({
   onTask: (t: LocalTask) => void;
 }) {
   const translations = useResource<any>("/api/translations", { tasks: [] }),
+    topics = useResource<any[]>("/api/topics/jobs", []),
     keywords = useResource<any>("/api/keywords/jobs", { jobs: [] }),
     metadata = useResource<any>("/api/metadata/jobs", { jobs: [] }),
     structured = useResource<any>("/api/processing/jobs", { jobs: [] }),
@@ -223,11 +221,13 @@ export function Tasks({
       structured.refresh();
       metadata.refresh();
       keywords.refresh();
+      topics.refresh();
       analysis.refresh();
     }, 5000);
     return () => clearInterval(timer);
   }, []);
   const tasks = [
+    ...topics.data.map((j: any) => ({...j, kind: "topics", task_id: j.id, title: `主题整理 · ${j.total} 篇`})),
     ...keywords.data.jobs.map((j: any) => ({
       ...j,
       kind: "keywords",
@@ -316,7 +316,7 @@ export function Tasks({
           translations.error ||
           analysis.error ||
           metadata.error ||
-          keywords.error
+          keywords.error || topics.error
         }
       />
       <div className="task-list">
@@ -369,6 +369,7 @@ export function Tasks({
           </button>
         </Modal>
       )}
+      {selected?.kind === "topics" && <Modal title="主题整理" onClose={() => setSelected(null)} wide><TopicTask id={selected.task_id}/></Modal>}
       {selected?.kind === "keywords" && (
         <Modal title="关键词整理" onClose={() => setSelected(null)} wide>
           <KeywordTask id={selected.task_id} />
@@ -380,7 +381,7 @@ export function Tasks({
         </Modal>
       )}
       {selected &&
-        !["structure", "metadata", "keywords"].includes(selected.kind) && (
+        !["structure", "metadata", "keywords", "topics"].includes(selected.kind) && (
           <TaskDetails
             task={selected}
             onClose={() => {

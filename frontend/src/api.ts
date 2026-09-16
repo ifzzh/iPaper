@@ -7,6 +7,20 @@ export class ApiError extends Error {
   }
 }
 const processingErrors: Record<string, string> = {
+  revision_conflict: "内容已在另一处更新，草稿保留。请重新核对后提交。",
+  topic_catalog_changed: "主题体系已变化，请重新检查扩展方向。",
+  topic_definition_in_use: "该自动整理方向已绑定其他主题，请先核对或合并。",
+  topic_name_conflict: "同一层级已有同名主题，请更名或明确合并。",
+  topic_deleted: "主题已删除，请在主题管理中核对近期操作。",
+  topic_not_found: "主题不存在或已无法访问。",
+  topic_cycle: "不能把主题调整到自己的后代中。",
+  topic_merge_cycle: "不能直接合并祖先与后代主题。",
+  undo_conflict: "相关内容有较新修改，本次撤销不会覆盖它们。",
+  request_id_conflict: "此操作内容已变化，请重新核对后提交。",
+  topic_bootstrap_budget: "本次体系检查超过本地处理预算，未保存不完整结果。",
+  topic_queue_full: "主题整理队列已满，请稍后重试。",
+  topic_storage_failed: "主题保存失败，原有信息保留，请重试。",
+
   tag_revision_conflict: "标签已在另一处更新。草稿已保留，请重新载入后核对。",
   tag_name_conflict: "此名称或别名已属于其他标签，请明确合并或改用其他名称。",
   tag_deleted: "这个标签已删除，可以在标签管理中恢复。",
