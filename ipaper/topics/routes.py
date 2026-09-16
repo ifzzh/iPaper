@@ -97,7 +97,10 @@ def register_topic_routes(app, service):
         data = body({"name", "parentId", "definitionId"})
         from .definitions import BY_ID
 
-        if data.get("definitionId") is not None and data["definitionId"] not in BY_ID:
+        if data.get("definitionId") is not None and (
+            not isinstance(data["definitionId"], str)
+            or data["definitionId"] not in BY_ID
+        ):
             raise TopicError("invalid_topic_definition")
         return (
             jsonify(

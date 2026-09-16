@@ -23,6 +23,8 @@ def nodes(db, owner):
 
 
 def resolve(db, owner, topic_id):
+    if not isinstance(topic_id, str) or not topic_id or len(topic_id) > 100:
+        raise TopicError("invalid_topic_id")
     tree = nodes(db, owner)
     seen = set()
     while topic_id in tree and topic_id not in seen:
@@ -684,7 +686,9 @@ def queue_change(db, owner, paper_id):
 def bind_definition(store, topic_id, definition_id, expected):
     from .definitions import BY_ID
 
-    if definition_id is not None and definition_id not in BY_ID:
+    if definition_id is not None and (
+        not isinstance(definition_id, str) or definition_id not in BY_ID
+    ):
         raise TopicError("invalid_topic_definition")
     with store.operation("bind") as db:
         node = resolve(db, store.owner, topic_id)

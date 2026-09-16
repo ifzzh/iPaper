@@ -143,3 +143,31 @@ def test_topic_navigation_survives_old_client_and_export_is_owned(topic_app):
     assert export.status_code == 200 and b"@" in export.data
     assert client.get("/api/topics/" + foreign + "/export").status_code == 404
     assert client.get("/api/topics/" + tid + "/export?format=arxiv").status_code == 200
+
+
+def test_malformed_topic_identifiers_fail_without_mutation(topic_app):
+    _, client, headers, _, _ = topic_app
+    for value in (["systems"], {"id": "systems"}, 42):
+        assert (
+            client.post(
+                "/api/topics",
+                json={"name": "bad", "definitionId": value},
+                headers=headers,
+            ).status_code
+            == 400
+        )
+    tid = client.post("/api/topics", json={"name": "valid"}, headers=headers).json["id"]
+    for action, extra in [
+        ("bind", {"definitionId": []}),
+        ("reparent", {"parentId": {"id": tid}}),
+        ("merge", {"targetId": [tid], "targetRevision": 1}),
+    ]:
+        assert (
+            client.patch(
+                "/api/topics/" + tid,
+                json={"action": action, "revision": 1, **extra},
+                headers=headers,
+            ).status_code
+            == 400
+        )
+    assert client.get("/api/topics").json["topics"][0]["revision"] == 1

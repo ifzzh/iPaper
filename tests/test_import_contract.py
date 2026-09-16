@@ -51,3 +51,17 @@ def test_import_executor_propagates_submitter_identity():
     owner=Identity(str(uuid.uuid4()),'submitter','user')
     future=run_as_identity(owner,lambda:import_route._import_workers.submit(current_user_id))
     assert future.result(timeout=5)==owner.user_id
+
+
+def test_import_topics_are_validated_before_worker_and_passed_separately(tmp_path,monkeypatch):
+    from ipaper.database import connection
+    from ipaper.topics.store import TopicStore
+    app,worker,queue=fixture(tmp_path,monkeypatch);client=app.test_client();csrf=login(client)
+    with app.app_context():
+        row=connection.get_db().execute("SELECT id FROM users WHERE username='reader_one'").fetchone()
+        topic=TopicStore(connection.DB_PATH,row[0]).create('逻辑主题')['id']
+    import json
+    denied=client.post('/api/import/zotero',data={'file':(io.BytesIO(b'<rdf/>'),'test.rdf'),'topicIds':json.dumps(['unknown'])},headers={'X-CSRF-Token':csrf})
+    assert denied.status_code==404 and not queue.calls
+    accepted=client.post('/api/import/zotero',data={'file':(io.BytesIO(b'<rdf/>'),'test.rdf'),'target_category_id':'root','topicIds':json.dumps([topic])},headers={'X-CSRF-Token':csrf})
+    assert accepted.status_code==202 and queue.calls[0][2]=='root' and queue.calls[0][3]==[topic]
