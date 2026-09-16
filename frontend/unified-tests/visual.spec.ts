@@ -2,11 +2,23 @@ import { test, expect } from "@playwright/test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+// Design-system acceptance for the UI phase 1: the primary/brand colour must
+// not be green, the library must be denser, and the shell must not overflow.
+const legacyGreen = [
+  "#128b80",
+  "#49b6a2",
+  "#67cdb8",
+  "#1eaa8e",
+  "#138568",
+  "#087366",
+  "#16b98c",
+];
+
 test("desktop and mobile unified visual acceptance with bounded PDF rendering", async ({
   page,
 }) => {
-  test.setTimeout(90000);
-  const root = resolve("../.devnotes/dual-translation-existing-ui");
+  test.setTimeout(120000);
+  const root = resolve("../.devnotes/ui-phase1-acceptance/synthetic");
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const errors: string[] = [],
     violations: string[] = [],
@@ -78,9 +90,126 @@ test("desktop and mobile unified visual acceptance with bounded PDF rendering", 
       }
     }
   }
+
+  // --- Design tokens: the brand/primary surfaces must not be green. ---
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/?paper=a-0");
+  await expect(page.locator(".detail-title")).toBeVisible();
+  await expect(page.locator(".paper-row")).toHaveCount(50);
+  const audit = await page.evaluate(() => {
+    const isGreenish = (rgb: string) => {
+      const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?/.exec(
+        rgb || "",
+      );
+      if (!m) return false;
+      const [r, g, b] = [+m[1], +m[2], +m[3]];
+      const a = m[4] === undefined ? 1 : +m[4];
+      if (a < 0.2) return false;
+      return g > r + 10 && g > b + 6;
+    };
+    const roles = [
+      ["brand mark", ".brand-mark"],
+      ["primary button", "button.primary, .button.primary"],
+      ["active rail nav", ".app-rail nav button.active"],
+      ["active library nav", ".library-navigation button.active"],
+      ["active workspace tab", ".workspace-tabs > button.active"],
+      ["selected paper row", ".paper-row.selected"],
+    ];
+    const out: any[] = [];
+    for (const [label, selector] of roles) {
+      const el = document.querySelector(selector);
+      if (!el) continue;
+      const s = getComputedStyle(el);
+      out.push({
+        label,
+        selector,
+        color: s.color,
+        background: s.backgroundColor,
+        border: s.borderColor,
+        greenPrimary:
+          isGreenish(s.background) ||
+          isGreenish(s.color) ||
+          isGreenish(s.borderColor),
+      });
+    }
+    const style = getComputedStyle(document.documentElement);
+    const accent = style.getPropertyValue("--accent").trim();
+    return { roles: out, accent };
+  });
+  for (const role of audit.roles)
+    expect(
+      { role: role.label, green: role.greenPrimary },
+      `primary surface "${role.label}" resolved to a green colour`,
+    ).toEqual({ role: role.label, green: false });
+  for (const legacy of legacyGreen)
+    expect(audit.accent.toLowerCase()).not.toBe(legacy);
+
+  // --- Library density and the collapsed empty detail column. ---
+  const rows = await page.locator(".paper-row").count();
+  const visibleRows = await page.locator(".paper-row:visible").count();
+  const rowBox = await page.locator(".paper-row").first().boundingBox();
+  expect(rows).toBeGreaterThanOrEqual(50);
+  expect(visibleRows).toBeGreaterThanOrEqual(8);
+  expect(rowBox!.height).toBeLessThanOrEqual(84);
+  await page.goto("/");
+  await expect(page.locator(".paper-row").first()).toBeVisible();
+  expect(await page.locator(".paper-details:visible").count()).toBe(0);
+
+  // --- Intermediate width and no horizontal overflow in either theme. ---
+  const widths: any[] = [];
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
+    for (const theme of ["light", "dark"] as const) {
+      await page.goto("/?paper=a-0");
+      await expect
+        .poll(
+          async () =>
+            page.locator(".paper-row:visible, .detail-title:visible").count(),
+        )
+        .toBeGreaterThan(0);
+      await page.evaluate((t) => {
+        document.documentElement.dataset.theme = t;
+      }, theme);
+      await page.screenshot({
+        path: resolve(root, `library-${width}-${theme}.png`),
+        animations: "disabled",
+      });
+      widths.push({
+        width,
+        theme,
+        overflow: await page.evaluate(
+          () => document.documentElement.scrollWidth - window.innerWidth,
+        ),
+      });
+    }
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/?view=reader&paper=a-0&document=original");
+  await expect(page.locator(".page-count")).toHaveText("/ 100");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth - window.innerWidth,
+    ),
+  ).toBeLessThanOrEqual(1);
+  for (const row of widths) expect(row.overflow).toBeLessThanOrEqual(1);
+
   writeFileSync(
     resolve(root, "synthetic-metrics.json"),
-    JSON.stringify({ measurements, errors, violations, external }, null, 2),
+    JSON.stringify(
+      {
+        measurements,
+        audit,
+        rows,
+        visibleRows,
+        rowHeight: rowBox!.height,
+        widths,
+        errors,
+        violations,
+        external,
+      },
+      null,
+      2,
+    ),
     { mode: 0o600 },
   );
   expect(errors).toEqual([]);
