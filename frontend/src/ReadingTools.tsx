@@ -110,13 +110,15 @@ export function useDocumentIdentity(
 function WindowList<T>({
   items,
   render,
+  compact = false,
 }: {
   items: T[];
   render: (item: T, index: number) => ReactNode;
+  compact?: boolean;
 }) {
   const [top, setTop] = useState(0),
     ref = useRef<HTMLDivElement>(null);
-  const height = 72,
+  const height = compact ? 34 : 72,
     first = Math.max(0, Math.floor(top / height) - 2),
     last = Math.min(items.length, first + 12);
   useEffect(() => {
@@ -125,7 +127,7 @@ function WindowList<T>({
   }, [items.length === 0]);
   return (
     <div
-      className="tool-window"
+      className={compact ? "tool-window compact" : "tool-window"}
       ref={ref}
       onScroll={(e) => setTop(e.currentTarget.scrollTop)}
     >
@@ -553,6 +555,7 @@ export function PdfNavigation({
             </p>
           )}
           <WindowList
+            compact
             items={headings}
             render={(h) => (
               <button title={h.title} onClick={() => onJump(h.page, h.offset)}>
@@ -1094,6 +1097,7 @@ export function StructureNavigation({
             <p className="muted">没有可用结构标题，不会自动生成目录。</p>
           )}
           <WindowList
+            compact
             items={headings}
             render={(h) => (
               <button title={h.title} onClick={() => onJump(h.blockId)}>

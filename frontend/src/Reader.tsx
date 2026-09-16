@@ -964,6 +964,7 @@ export function PdfReader({
         >
           <ChevronRight size={17} />
         </button>
+        <div className="toolbar-separator" />
         <select
           aria-label="缩放"
           value={zoom}
@@ -981,8 +982,9 @@ export function PdfReader({
           ))}
         </select>
         <button
-          className="icon-button"
+          className="icon-button rotate-button"
           aria-label="旋转"
+          title="旋转页面"
           onClick={() => setRotation((v) => (v + 90) % 360)}
           disabled={!doc}
         >
