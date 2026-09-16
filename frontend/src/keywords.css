@@ -1,16 +1,16 @@
 .keyword-chips {
   display: flex;
-  gap: 5px;
+  gap: 4px;
   flex-wrap: wrap;
-  margin-top: 8px;
+  margin-top: 5px;
   align-items: center;
 }
 .keyword-chip {
-  font-size: 12px;
-  padding: 3px 8px;
-  border-radius: 5px;
+  font-size: var(--fs-2xs);
+  padding: 2px 7px;
+  border-radius: var(--r-sm);
   background: var(--accent-bg);
-  color: var(--accent, #168272);
+  color: var(--accent, #5a5f8c);
   border: 1px solid transparent;
   max-width: 100%;
   overflow-wrap: anywhere;

@@ -47,16 +47,16 @@
   background: var(--surface);
 }
 .understanding-heading {
-  padding: 18px 24px 10px;
+  padding: 14px 20px 8px;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
 }
 .understanding-heading h1 {
-  font-size: 21px;
-  line-height: 1.4;
-  margin: 5px 0;
+  font-size: var(--fs-xl);
+  line-height: var(--lh-tight);
+  margin: 4px 0;
   overflow-wrap: anywhere;
 }
 .understanding-actions {
@@ -64,9 +64,9 @@
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
-  padding: 8px 24px 12px;
+  padding: 8px 20px 10px;
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 .understanding-actions > span {
   flex: 1 1 220px;
@@ -81,7 +81,7 @@
 .understanding-scroll {
   flex: 1;
   overflow: auto;
-  padding: 20px clamp(18px, 4vw, 64px) 60px;
+  padding: 18px clamp(18px, 4vw, 56px) 56px;
   min-height: 0;
   overscroll-behavior: contain;
 }
@@ -92,9 +92,9 @@
   line-height: 1.9;
 }
 .author-abstract {
-  padding: 14px 16px;
+  padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--r-md);
   color: var(--muted);
 }
 .author-abstract summary {
@@ -117,6 +117,7 @@
 }
 .analysis-metadata select {
   max-width: 270px;
+  font-size: var(--fs-xs);
 }
 .analysis-input-note {
   font-size: 12px;

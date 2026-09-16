@@ -198,8 +198,8 @@
 .pdf-source-highlight {
   position: absolute;
   pointer-events: none;
-  background: rgba(30, 170, 142, 0.18);
-  outline: 2px solid #1eaa8e;
+  background: var(--accent-bg);
+  outline: 2px solid var(--accent);
   z-index: 4;
 }
 .load-previous {
