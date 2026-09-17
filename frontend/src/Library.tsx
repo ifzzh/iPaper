@@ -14,6 +14,7 @@ import {
 import { TranslationDialog } from "./Processing";
 import { ResizeHandle } from "./ResizeHandle";
 import { useEffect, useMemo, useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   Library as LibraryIcon,
   Star,
@@ -109,6 +110,7 @@ export function Library({
   refreshTree,
   filter,
   setFilter,
+  sidebarSlot,
 }: {
   preferences: any;
   onPreferences: (v: Record<string, unknown>) => void;
@@ -126,6 +128,7 @@ export function Library({
   refreshTree: () => void;
   filter: string;
   setFilter: (s: string) => void;
+  sidebarSlot?: HTMLElement | null;
 }) {
   const layout = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -283,10 +286,6 @@ export function Library({
               {activeFilters > 0 ? ` · 已筛选 ${activeFilters} 项` : ""}
             </p>
           </div>
-          <button className="primary" onClick={onImport}>
-            <Plus size={16} />
-            导入文献
-          </button>
         </header>
         <div className="scope-tabs" role="tablist" aria-label="文献范围">
           {[
@@ -893,16 +892,6 @@ export function Library({
               </div>
             </section>
             <section>
-              <div className="section-label">研究主题</div>
-              <TopicSidebar
-                filter={topicFilter}
-                onFilter={chooseTopics}
-                changed={topicRevision}
-                collapsed={preferences.topicCollapsed || []}
-                onCollapsed={(ids) => onPreferences({ topicCollapsed: ids })}
-              />
-            </section>
-            <section>
               <div className="section-label">
                 关键词
                 <button
@@ -985,6 +974,19 @@ export function Library({
           </footer>
         </Modal>
       )}
+      {sidebarSlot &&
+        createPortal(
+          <div className="sidebar-topics-inner">
+            <TopicSidebar
+              filter={topicFilter}
+              onFilter={chooseTopics}
+              changed={topicRevision}
+              collapsed={preferences.topicCollapsed || []}
+              onCollapsed={(ids) => onPreferences({ topicCollapsed: ids })}
+            />
+          </div>,
+          sidebarSlot,
+        )}
       {action === "topic-manager" && <TopicManager onClose={() => {setAction(""); setTopicRevision(v => v + 1); list.refresh();}}/>}
       {topicSelection && <TopicBatchDialog selection={topicSelection} onClose={() => setTopicSelection(null)} onChanged={() => {setTopicRevision(v => v + 1); list.refresh();}}/>}
     </div>

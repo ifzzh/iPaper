@@ -21,6 +21,7 @@
 - 产品**浅色优先**：无显式偏好时默认浅色；`templates/workbench.html` 声明 `<meta name="color-scheme" content="light">`，`:root` 声明 `color-scheme: light`。
 - **不跟随系统自动深色**：`style.css` 不包含 `@media (prefers-color-scheme: dark)` 令牌块；也避免浏览器自动深色改写浅色页面。
 - 深色只在 `html[data-theme="dark"]` 下生效，并由用户在界面显式切换；切换会通过既有工作区状态保存，服务端已保存的 `light`/`dark` 原样保留。
+- **懒加载样式隔离**：PDF.js 的 `pdf_viewer.css` 也会声明 `:root { color-scheme: light dark }`，会盖掉普通 `:root` 规则。`style.css` 因此用更高优先级的 `:root:not([data-theme])`、`html:not([data-theme])`、`html[data-theme="light"]` 与 `html[data-theme="dark"]` 显式声明 `color-scheme`，阅读器 chunk 加载前后计算样式都跟随用户选择；PDF 页面与图表原色不变。
 - 截图/证据脚本必须通过**真实主题入口**操作并断言 `data-theme` 与计算底色，结束后恢复账号原有偏好，禁止直接改 DOM 属性伪造浅色。
 
 ## 3. 设计令牌
@@ -63,19 +64,22 @@
 ## 4. 结构
 
 ### 全局框架
-一条 `.app-sidebar`（248px，白底、右侧 `--divider`）承载品牌、主导航与底部说明；`.app-header`（52px）左侧是论文页签（`role="tab"`、`.paper-tab`），右侧是导入、主题、账号与退出。≤1100px 侧栏变为抽屉（顶栏菜单按钮、遮罩与 Escape 关闭），抽屉内导航即全部导航，不再有第二层导航列。
+一条 `.app-sidebar`（248px，白底、右侧 `--divider`）承载品牌、主导航、**研究主题浏览**（`.sidebar-topics`）与底部说明。主题树通过 `createPortal` 渲染进这条侧栏，关键词与组合筛选仍放在筛选弹窗，所以日常按主题浏览不必先打开弹窗，也不恢复第二层导航列。`.app-header`（52px）左侧是论文页签（`role="tab"`、`.paper-tab`），右侧是唯一的导入入口、主题、账号与退出；文献库页头只保留标题与数量，不再重复放一个同等权重的导入按钮。≤1100px 侧栏变为抽屉（顶栏菜单按钮、遮罩与 Escape 关闭）。
 
 ### 文献库
-`页头 → 范围标签 → 一条工具栏 → 已选条件 → 内容`：
+`页头 → 范围标签 → 一条工具栏 → 已选条件 → 列表 → 分页`：
 - `.page-heading`：真实页面标题（`--fs-2xl`）、数量与主操作「导入文献」。
 - `.scope-tabs`：全部文献／收藏／Reading List，下划线选中态，不使用第二层导航。
 - `.list-toolbar`：搜索框（聚焦有强调描边）、`筛选` 按钮（带条件计数）、排序、刷新。
 - `.applied-filters`：仅在存在筛选时出现，条件可逐条移除；批量操作放在选中后才出现的 `.batch-toolbar`。
 - `.paper-row`：**无边框行**——标题（15px/600，两行截断＋全文提示）、作者·年份（可展开全部作者）、最多 3 个纯文字标签、资产状态；悬停 `--hover`，选中 `--accent-soft` ＋ 2px 左强调条；复选框与收藏在悬停/聚焦/选中或触屏下才显示。
 - `.paper-details`：白底、`--divider` 左边框；大标题、作者、强调主操作、细分隔线分组（处理入口、摘要、主题、标签、文献信息、来源/BibTeX），低频动作进溢出菜单。
+- `.pagination`：`flex` + `gap 12px` + `padding 10px 24px` + 上边 `--divider` 分隔；「选择当前页」用 `margin-right: auto` 单独靠左，范围与页码为不换行的弱化文字，翻页按钮 ≥28px 点击区；窄屏减小字号与间距但不堆叠。
 
 ### 阅读器
-顶部只有一条 `.reader-toolbar`（52px）：阅读导航、搜索、`.mode-switch`（AI 概览／深度解读／阅读正文）、文档标题、版本、页码、缩放、旋转、问答；正文区使用 `--canvas` 外壳，页面只加 `--shadow-sm`。左阅读导航为紧凑行（虚拟机行高一致）；分析视图复用同一条顶栏与模式切换。
+顶部只有一条 `.reader-toolbar`（52px 起）：阅读导航、搜索、`.mode-switch`（AI 概览／深度解读／阅读正文）、文档标题、版本（含"版式结果版本"）、页码、缩放、旋转、问答；正文区使用 `--canvas` 外壳，页面只加 `--shadow-sm`。左阅读导航为紧凑行（虚拟机行高一致）；分析视图复用同一条顶栏与模式切换。
+
+工具栏规则：`select/input/图标按钮` 一律 `flex: 0 0 auto` 并保留可用最小宽度（页码 52px、`/ N` 不换行、下拉最大宽度按断点收敛到 260/200/168px），**标题先让出空间**（`flex: 1 1 120px` 并省略号），`flex-wrap: wrap` 允许低频控件整体换行。绝不能把"版式译文""适合宽度"等真实标签压成单字。
 
 ### 问答侧栏
 `.chat-head`：标题＋消息数、会话下拉、`.menu-wrap/.menu-list` 溢出菜单（新会话／刷新历史／删除当前会话）。消息：助手为白底排版（正文 `--fs-base`、行高 1.7），用户为 `--subtle` 圆角气泡；来源为小型文字按钮。输入：`.compose-box` 整块带边框容器，内联发送/停止，引用卡在上方，底部只保留一行提示。
@@ -86,4 +90,5 @@
 - 不新增品牌皮肤或主题编辑器；浅色与深色分别调校。
 - 保留下述测试钩子：`.paper-row`、`.paper-details`、`.paper-tab`、`.category-tree`、`role="tab"`。
 - 一屏密度用**行与列表滚动视口的矩形交集**度量（完整/部分可见分别记录），不得用 `.paper-row:visible` 总数，也不以压缩字号与行高作为目标。
-- 证据与验收：`.devnotes/ui-phase1-rework/`；交付记录 `.devnotes/ipaper-ui-phase1-rework-delivery.md`。
+- 证据与验收：`.devnotes/ui-phase1-rework/`；交付记录 `.devnotes/ipaper-ui-phase1-rework-delivery.md`，收尾记录 `.devnotes/ipaper-ui-1.8.1-closeout.md`。
+- 抓取脚本必须在 **`finally` 中、浏览器与会话仍有效时**恢复账号主题偏好并核对：显式 `light`/`dark` 写回原值，`system` 保留为 `system`，无偏好则删除该键；若当前值不是本次脚本写入的值（并发用户改动）则跳过并记录。密度必须在列表内容与布局稳定后、与截图同一状态下测量，论文库中测到 `total=0` 视为未就绪而不是有效结果；结构阅读与问答场景要断言到对应组件，且截图侧车记录版本、提交与镜像 revision。

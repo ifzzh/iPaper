@@ -60,7 +60,8 @@ function App() {
     [logoutFailed, setLogoutFailed] = useState(false),
     [layoutRevision, setLayoutRevision] = useState(0),
     [stateRevision, setStateRevision] = useState(0),
-    [sidebarOpen, setSidebarOpen] = useState(false);
+    [sidebarOpen, setSidebarOpen] = useState(false),
+    [sidebarSlot, setSidebarSlot] = useState<HTMLDivElement | null>(null);
   const logoutBlocked = useRef(false),
     authCheck = useRef<AbortController | null>(null),
     saveQueue = useRef(Promise.resolve()),
@@ -429,6 +430,7 @@ function App() {
             </button>
           ))}
         </nav>
+        <div className="sidebar-topics" ref={setSidebarSlot} />
         <div className="sidebar-foot">
           <BookOpen size={16} />
           <div>
@@ -564,6 +566,7 @@ function App() {
           <Suspense fallback={<Status loading />}>
             {locationState.view === "library" && (
               <Library
+                sidebarSlot={sidebarSlot}
                 preferences={preferences.current}
                 onPreferences={updatePreferences}
                 items={items}
