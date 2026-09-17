@@ -22,7 +22,9 @@ A version number or screen on the development branch does not establish release 
 
 [Release 1.4.0](https://github.com/ifzzh/iPaper/releases/tag/v1.4.0) is deployed and verified. It adds full-document search, outlines and versioned bookmarks, cached paragraph translations in the original PDF, explicit selection translation, and figure/table/formula enlargement. No OCR or model request is triggered by searching or reading cached results. See [reading tools and limits](docs/development/reading-tools.md). That release uses Web 1.4.0 with Workers 1.2.0.
 
-Web 1.8.1 is published and deployed; the release record includes verified image digests and acceptance results.
+Web 1.8.2 is published and deployed; the release record includes verified image digests and acceptance results.
+
+1.8.2 closes out the first UI phase: it fixes the squeezed translated/structure reader toolbar, the missing library pagination layout and the theme `color-scheme` fallback after the lazy reader chunk loads, moves research topics back into the single sidebar and removes the duplicate import entry. The bright 1.8.1 composition is unchanged. See [release status](docs/releases/v1.8.2.md).
 
 1.8.1 reworks the first UI phase around a bright, light-first composition: one sidebar replaces the previous two navigation layers, the library gains a real page title, a single toolbar and a flat list rhythm with contextual filtering and batch actions, the reader merges its mode switch into one toolbar, and the assistant sidebar uses a session menu and a single composer component. The product is light-first; dark stays an explicit reading preference and the interface no longer uses green, including status colours. Existing papers, reading positions, translations, analysis, chat, bookmarks, metadata, keywords and topics are unchanged. See the [UI design system](docs/development/ui-design-system.md) and [release status](docs/releases/v1.8.1.md). The 1.8.0 visuals were not accepted and remain historical. Only Web changes; both Workers remain on verified 1.2.0 digests.
 
