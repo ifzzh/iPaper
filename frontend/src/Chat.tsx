@@ -10,6 +10,9 @@ import {
   Send,
   Plus,
   RefreshCw,
+  MoreHorizontal,
+  Trash2,
+  Square,
 } from "lucide-react";
 export type Excerpt = {
   text: string;
@@ -104,6 +107,7 @@ export function Chat({
     scrollPositions = useRef(new Map<string, number>()),
     restoreScroll = useRef<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [menu, setMenu] = useState(false);
   const [away, setAway] = useState(false);
   const lastTurn = useRef("");
   function rememberSession(sessionId: string) {
@@ -392,38 +396,80 @@ export function Chat({
   }
   return (
     <aside className="chat-panel" aria-label="论文问答">
-      <div className="chat-actions">
-        {id && (
-          <button
-            aria-label="删除当前会话"
-            disabled={busy || loading}
-            onClick={() => setDeleting(true)}
+      <div className="chat-head">
+        <div className="chat-head-title">
+          <h2>论文问答</h2>
+          <small>{messages.length ? `${messages.length} 条消息` : "新会话"}</small>
+        </div>
+        <label className="chat-session">
+          <span className="sr-only">聊天会话</span>
+          <select
+            aria-label="聊天会话"
+            value={id}
+            onChange={(e) => void choose(e.target.value)}
           >
-            删除
+            <option value="">新会话</option>
+            {sessions.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div
+          className="menu-wrap"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setMenu(false);
+          }}
+        >
+          <button
+            className="icon-button"
+            aria-label="会话操作"
+            aria-expanded={menu}
+            onClick={() => setMenu((v) => !v)}
+          >
+            <MoreHorizontal size={16} />
           </button>
-        )}
-        <select
-          aria-label="聊天会话"
-          value={id}
-          onChange={(e) => void choose(e.target.value)}
-        >
-          <option value="">新会话</option>
-          {sessions.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.title}
-            </option>
-          ))}
-        </select>
-        <button
-          title="新会话"
-          aria-label="新会话"
-          onClick={() => void choose("")}
-        >
-          <Plus size={16} />
-        </button>
-        <button disabled={busy || loading} onClick={() => void refresh()}>
-          刷新历史
-        </button>
+          {menu && (
+            <div className="menu-list" role="menu">
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setMenu(false);
+                  void choose("");
+                }}
+              >
+                <Plus size={15} />
+                新会话
+              </button>
+              <button
+                role="menuitem"
+                disabled={busy || loading}
+                onClick={() => {
+                  setMenu(false);
+                  void refresh();
+                }}
+              >
+                <RefreshCw size={15} />
+                刷新历史
+              </button>
+              {id && (
+                <button
+                  role="menuitem"
+                  className="danger"
+                  disabled={busy || loading}
+                  onClick={() => {
+                    setMenu(false);
+                    setDeleting(true);
+                  }}
+                >
+                  <Trash2 size={15} />
+                  删除当前会话
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
       <div
         className="chat-messages"
@@ -590,41 +636,52 @@ export function Chat({
         {scope === "local" && prepareSources && !excerpt && (
           <small>本次仅使用当前结构块和相邻段落。</small>
         )}
-        <label htmlFor="question">你的问题</label>
-        <textarea
-          id="question"
-          value={draft}
-          disabled={busy || loading}
-          onChange={(e) => editDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (
-              e.key === "Enter" &&
-              !e.shiftKey &&
-              !e.nativeEvent.isComposing
-            ) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-          rows={3}
-        />
-        <div className="chat-actions">
-          <button
-            className="primary"
-            disabled={busy || loading || !draft.trim()}
-          >
-            发送
-          </button>
-          {busy && (
-            <button type="button" onClick={() => stream.current?.abort()}>
-              停止接收
+        <label className="sr-only" htmlFor="question">
+          你的问题
+        </label>
+        <div className="compose-box">
+          <textarea
+            id="question"
+            placeholder="询问方法、结果或局限…"
+            value={draft}
+            disabled={busy || loading}
+            onChange={(e) => editDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (
+                e.key === "Enter" &&
+                !e.shiftKey &&
+                !e.nativeEvent.isComposing
+              ) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+            rows={3}
+          />
+          <div className="compose-actions">
+            {busy && (
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => stream.current?.abort()}
+              >
+                <Square size={13} />
+                停止接收
+              </button>
+            )}
+            <button
+              className="primary send-button"
+              disabled={busy || loading || !draft.trim()}
+            >
+              <Send size={14} />
+              发送
             </button>
-          )}
+          </div>
         </div>
+        <p className="footnote">
+          停止接收或切换会话不会确认服务端取消。
+        </p>
       </form>
-      <p className="footnote">
-        停止接收或切换会话不会确认服务端取消。失败后请先核对历史。
-      </p>
       {deleting && (
         <Confirm
           title="删除当前会话"

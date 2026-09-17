@@ -301,6 +301,7 @@ export function Reader(props: ReaderProps) {
       {mode === "structure" ? (
         <main className="structured-workspace">
           <div className="reader-toolbar">
+            {props.toolbarLead}
             {controls}
             {selected && (
               <select

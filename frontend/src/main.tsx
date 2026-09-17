@@ -14,6 +14,7 @@ import {
   Upload,
   BookOpen,
   ChevronLeft,
+  Menu,
 } from "lucide-react";
 import { Auth } from "./Auth";
 import { Library, type Category } from "./Library";
@@ -50,7 +51,7 @@ function App() {
     [notice, setNotice] = useState(""),
     [locationState, setLocation] = useState(route),
     [tabs, setTabs] = useState<string[]>([]),
-    [theme, setTheme] = useState("system"),
+    [theme, setTheme] = useState("light"),
     [importing, setImporting] = useState(false),
     [filter, setFilter] = useState("all"),
     [revision, setRevision] = useState(0),
@@ -58,7 +59,8 @@ function App() {
     [taskRefs, setTaskRefs] = useState<LocalTask[]>([]),
     [logoutFailed, setLogoutFailed] = useState(false),
     [layoutRevision, setLayoutRevision] = useState(0),
-    [stateRevision, setStateRevision] = useState(0);
+    [stateRevision, setStateRevision] = useState(0),
+    [sidebarOpen, setSidebarOpen] = useState(false);
   const logoutBlocked = useRef(false),
     authCheck = useRef<AbortController | null>(null),
     saveQueue = useRef(Promise.resolve()),
@@ -125,7 +127,7 @@ function App() {
     saveController.current = new AbortController();
     epoch.current++;
     preferences.current = {};
-    setTheme("system");
+    setTheme("light");
     controller.current?.abort();
     setUser(null);
     identity.current = null;
@@ -227,7 +229,7 @@ function App() {
         if (c.signal.aborted) return;
         preferences.current = s;
         setTabs(s.tabs || []);
-        setTheme(s.theme || "system");
+        setTheme(s.theme === "dark" ? "dark" : "light");
         setTaskRefs(s.taskRefs || []);
         setStateReady(true);
       })
@@ -243,6 +245,14 @@ function App() {
     document.documentElement.dataset.theme = theme;
     return () => {};
   }, [theme]);
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const close = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSidebarOpen(false);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [sidebarOpen]);
   useEffect(() => {
     if (!allowed || !stateReady) return;
     const owner = user!.id,
@@ -378,15 +388,27 @@ function App() {
   ] as const;
   return (
     <div className="app-shell" ref={shell}>
-      <aside className="app-rail">
-        <button
-          className="brand-mark"
-          aria-label="iPaper 文献库"
-          onClick={() => navigate("library", "")}
-        >
-          P
-        </button>
-        <nav>
+      <aside
+        className={"app-sidebar" + (sidebarOpen ? " open" : "")}
+        aria-label="应用导航"
+      >
+        <div className="sidebar-brand">
+          <button
+            className="brand-mark"
+            aria-label="iPaper 文献库"
+            onClick={() => {
+              navigate("library", "");
+              setSidebarOpen(false);
+            }}
+          >
+            i
+          </button>
+          <div className="brand-text">
+            <strong>iPaper</strong>
+            <small>论文与研究工作台</small>
+          </div>
+        </div>
+        <nav className="sidebar-nav" aria-label="主导航">
           {nav.map(([id, label, Icon]) => (
             <button
               key={id}
@@ -397,33 +419,105 @@ function App() {
                   ? "active"
                   : ""
               }
-              title={label}
-              aria-label={label}
-              onClick={() => navigate(id)}
+              onClick={() => {
+                navigate(id);
+                setSidebarOpen(false);
+              }}
             >
-              <Icon size={21} />
+              <Icon size={18} />
               <span>{label}</span>
             </button>
           ))}
         </nav>
-        <button
-          className="theme-button"
-          aria-label="切换浅深主题"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-        >
-          {theme === "dark" ? <Sun size={19} /> : <Moon size={19} />}
-        </button>
+        <div className="sidebar-foot">
+          <BookOpen size={16} />
+          <div>
+            本地优先，安全存储
+            <small>{items.length} 篇文献</small>
+          </div>
+        </div>
       </aside>
+      {sidebarOpen && (
+        <button
+          className="sidebar-scrim"
+          aria-label="关闭导航"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
       <div className="app-main">
         <header className="app-header">
-          <button className="brand" onClick={() => navigate("library", "")}>
+          <button
+            className="icon-button sidebar-toggle"
+            aria-label="打开导航"
+            title="打开导航"
+            onClick={() => setSidebarOpen(true)}
+          >
+            <Menu size={18} />
+          </button>
+          <button
+            className="brand"
+            aria-label="iPaper 文献库"
+            onClick={() => navigate("library", "")}
+          >
             iPaper
           </button>
-          <span className="header-subtitle">你的论文阅读与研究空间</span>
+          <div className="workspace-tabs" role="tablist" aria-label="打开的论文">
+            {tabs.map((id) => (
+              <div
+                className={
+                  "paper-tab " +
+                  (["reader", "analysis"].includes(locationState.view) &&
+                  id === locationState.paper
+                    ? "active"
+                    : "")
+                }
+                key={id}
+              >
+                <button
+                  role="tab"
+                  aria-selected={
+                    ["reader", "analysis"].includes(locationState.view) &&
+                    id === locationState.paper
+                  }
+                  onClick={() => {
+                    navigate(
+                      "reader",
+                      id,
+                      preferences.current.tabDocuments?.[id] === "translated",
+                    );
+                    setSidebarOpen(false);
+                  }}
+                  title={items.find((p) => p.id === id)?.title}
+                >
+                  <span>
+                    {items.find((p) => p.id === id)?.title || "正在加载论文…"}
+                  </span>
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label={
+                    "关闭论文标签 " +
+                    (items.find((p) => p.id === id)?.title || id)
+                  }
+                  onClick={() => closeTab(id)}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
           <div className="header-actions">
-            <button onClick={() => setImporting(true)}>
+            <button className="primary" onClick={() => setImporting(true)}>
               <Upload size={15} />
               <span>导入文献</span>
+            </button>
+            <button
+              className="icon-button"
+              aria-label="切换浅深主题"
+              title="切换浅深主题"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            >
+              {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
             </button>
             <button
               onClick={() =>
@@ -449,60 +543,6 @@ function App() {
             </button>
           </div>
         </header>
-        <div className="workspace-tabs" role="tablist">
-          <button
-            role="tab"
-            aria-selected={locationState.view === "library"}
-            className={locationState.view === "library" ? "active" : ""}
-            onClick={() => navigate("library")}
-          >
-            <LibraryIcon size={14} />
-            我的文献库
-          </button>
-          {tabs.map((id) => (
-            <div
-              className={
-                "paper-tab " +
-                (["reader", "analysis"].includes(locationState.view) &&
-                id === locationState.paper
-                  ? "active"
-                  : "")
-              }
-              key={id}
-            >
-              <button
-                role="tab"
-                aria-selected={
-                  ["reader", "analysis"].includes(locationState.view) &&
-                  id === locationState.paper
-                }
-                onClick={() =>
-                  navigate(
-                    "reader",
-                    id,
-                    preferences.current.tabDocuments?.[id] === "translated",
-                  )
-                }
-                title={items.find((p) => p.id === id)?.title}
-              >
-                <BookOpen size={13} />
-                <span>
-                  {items.find((p) => p.id === id)?.title || "正在加载论文…"}
-                </span>
-              </button>
-              <button
-                className="icon-button"
-                aria-label={
-                  "关闭论文标签 " +
-                  (items.find((p) => p.id === id)?.title || id)
-                }
-                onClick={() => closeTab(id)}
-              >
-                <X size={13} />
-              </button>
-            </div>
-          ))}
-        </div>
         {notice && (
           <div className="global-notice" role="status">
             {notice}

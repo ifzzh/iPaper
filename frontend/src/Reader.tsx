@@ -268,6 +268,7 @@ export function PdfReader({
   onExpired,
   drafts,
   toolbarContent,
+  toolbarLead,
   sourceTarget,
   fileDocumentId,
   onSource,
@@ -288,6 +289,7 @@ export function PdfReader({
   onExpired: () => void;
   drafts?: Map<string, string>;
   toolbarContent?: ReactNode;
+  toolbarLead?: ReactNode;
   embedded?: boolean;
   structureResult?: ProcessingResult;
   translationResults?: ProcessingResult[];
@@ -907,6 +909,7 @@ export function PdfReader({
         >
           <Search size={17} />
         </button>
+        {toolbarLead}
         <span className="reader-document-title" title={paper.title}>
           {paper.title}
         </span>
@@ -1251,22 +1254,16 @@ export function PdfReader({
               }}
             />
             <section className="reader-chat">
-              <div className="panel-heading">
-                <div>
-                  <span className="eyebrow">PAPER ASSISTANT</span>
-                  <h2>论文问答</h2>
-                </div>
-                <button
-                  className="icon-button"
-                  aria-label="收起问答"
-                  onClick={() => {
-                    setChat(false);
-                    setMobileChat(false);
-                  }}
-                >
-                  <X size={17} />
-                </button>
-              </div>
+              <button
+                className="icon-button chat-close"
+                aria-label="收起问答"
+                onClick={() => {
+                  setChat(false);
+                  setMobileChat(false);
+                }}
+              >
+                <X size={17} />
+              </button>
               <Chat
                 key={paper.id}
                 paperId={paper.id}

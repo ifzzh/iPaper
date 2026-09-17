@@ -35,6 +35,7 @@ import {
   Download,
   Check,
   Tags,
+  SlidersHorizontal,
   X,
   ArrowUpRight,
 } from "lucide-react";
@@ -148,7 +149,7 @@ export function Library({
       unknown
     > | null>(null);
   const [topicRevision, setTopicRevision] = useState(0);
-  const [mobileTopics, setMobileTopics] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [topicFilter, setTopicFilter] = useState<string>(preferences.topicFilter || 'all');
   useEffect(() => {if(preferences.topicFilter) setTopicFilter(preferences.topicFilter);}, [preferences.topicFilter]);
   function chooseTopics(value: string) {
@@ -266,66 +267,48 @@ export function Library({
   const scopeTitle = filter === 'favorites' ? '收藏' : filter === 'reading' ? 'Reading List' : '全部文献';
   const topicTitle = topicFilter === 'unorganized' ? '待整理' : topicFilter.startsWith('topic:') ? topicFilter.slice(6).split(',').map(id => topicCatalog.data.topics.find(t => t.id === id)?.name || '主题').join('、') : '';
   const title = topicTitle ? `${scopeTitle} · ${topicTitle}` : scopeTitle;
+  const activeFilters =
+    (filter !== 'all' ? 1 : 0) + (topicFilter !== 'all' ? 1 : 0) + tagIds.length;
   return (
     <div
       ref={layout}
       className={"library-workspace " + (paper ? "has-selection" : "")}
     >
-      <aside className="category-sidebar">
-        <ResizeHandle
-          host={layout}
-          property="--category-width"
-          label="调整分类栏宽度"
-          min={180}
-          max={420}
-          initial={preferences.categoryWidth || 248}
-          onChange={(v) => onPreferences({ categoryWidth: v })}
-        />
-        <div className="panel-heading">
+      <section className="library-list-panel">
+        <header className="page-heading">
           <div>
-            <span className="eyebrow">IPAPER</span>
-            <h2>我的文献库</h2>
+            <h1>{title}</h1>
+            <p>
+              {total} 篇文献
+              {activeFilters > 0 ? ` · 已筛选 ${activeFilters} 项` : ""}
+            </p>
           </div>
-          <button
-            className="icon-button"
-            title="管理主题"
-            aria-label="管理主题"
-            onClick={() => {
-              setAction("topic-manager");
-            }}
-          >
-            <Plus size={18} />
+          <button className="primary" onClick={onImport}>
+            <Plus size={16} />
+            导入文献
           </button>
-        </div>
-        <nav className="library-navigation">
+        </header>
+        <div className="scope-tabs" role="tablist" aria-label="文献范围">
           {[
-            ["all", "全部文献", LibraryIcon, items.length],
-            ["favorites", "收藏", Star, items.filter((p) => p.starred).length],
-            ["reading", "Reading List", Bookmark, reading.data.length],
-          ].map(([id, label, Icon, count]: any) => (
+            ["all", "全部文献", items.length],
+            ["favorites", "收藏", items.filter((p) => p.starred).length],
+            ["reading", "Reading List", reading.data.length],
+          ].map(([id, label, count]: any) => (
             <button
+              role="tab"
+              aria-selected={filter === id}
               className={filter === id ? "active" : ""}
               key={id}
               onClick={() => setFilter(id)}
             >
-              <Icon size={17} />
-              <span>{label}</span>
+              {label}
               <small>{count}</small>
             </button>
           ))}
-        </nav>
-        <TopicSidebar filter={topicFilter} onFilter={chooseTopics} changed={topicRevision} collapsed={preferences.topicCollapsed || []} onCollapsed={ids=>onPreferences({topicCollapsed:ids})}/>
-        <div className="sidebar-foot">
-          <BookOpen size={17} />
-          <div>
-            专注阅读，连接思考<small>{items.length} 篇文献 · 安全存储</small>
-          </div>
         </div>
-      </aside>
-      <section className="library-list-panel">
         <div className="list-toolbar">
           <label className="search">
-            <Search size={17} />
+            <Search size={16} />
             <input
               aria-label="搜索文献"
               placeholder="搜索标题、作者、摘要…"
@@ -334,77 +317,71 @@ export function Library({
             />
           </label>
           <button
+            className="filter-button"
+            aria-expanded={filtersOpen}
+            onClick={() => setFiltersOpen(true)}
+          >
+            <SlidersHorizontal size={15} />
+            <span>筛选</span>
+            {activeFilters > 0 && <b>{activeFilters}</b>}
+          </button>
+          <select
+            aria-label="文献排序"
+            value={order}
+            onChange={(e) => setOrder(e.target.value)}
+          >
+            <option value="recent">最近导入</option>
+            <option value="title">按标题</option>
+            <option value="year">按年份</option>
+          </select>
+          <button
             className="icon-button"
             aria-label="刷新文献"
             title="刷新文献"
             onClick={onChanged}
           >
-            <RefreshCw size={17} />
+            <RefreshCw size={16} />
           </button>
         </div>
-        <div className="keyword-filter-bar" aria-label="筛选条件">
-          {filter !== "all" && (
-            <button
-              className="filter-chip"
-              title="移除范围筛选"
-              onClick={() => setFilter("all")}
-            >
-              {filter === "favorites" ? "收藏" : "Reading List"}
-              <X size={12} />
-            </button>
-          )}
-          {topicFilter !== "all" && (
-            <button
-              className="filter-chip"
-              title="移除主题筛选"
-              onClick={() => chooseTopics("all")}
-            >
-              {topicTitle || (topicFilter === "unorganized" ? "待整理" : "研究主题")}
-              <X size={12} />
-            </button>
-          )}
-          <Tags size={15} />
-          <select
-            aria-label="按关键词筛选"
-            value=""
-            onChange={(e) => {
-              const t = catalog.data.tags.find((x) => x.id === e.target.value);
-              if (t) addFilter(t);
-            }}
-          >
-            <option value="">选择标签</option>
-            {catalog.data.tags.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}（{t.count}）
-              </option>
-            ))}
-          </select>
-          {tagIds.map((id) => (
-            <button
-              className="keyword-chip"
-              key={id}
-              onClick={() => setTagIds((v) => v.filter((x) => x !== id))}
-            >
-              {catalog.data.tags.find((t) => t.id === id)?.name || "标签"}
-              <X size={12} />
-            </button>
-          ))}
-          {!!tagIds.length && (
-            <>
-              <select
-                aria-label="多标签匹配方式"
-                value={tagMode}
-                onChange={(e) => setTagMode(e.target.value)}
+        {activeFilters > 0 && (
+          <div className="applied-filters" aria-label="已选条件">
+            {filter !== "all" && (
+              <button
+                className="filter-chip"
+                title="移除范围筛选"
+                onClick={() => setFilter("all")}
               >
-                <option value="all">同时满足</option>
-                <option value="any">任一满足</option>
-              </select>
-              <button className="text-button" onClick={() => setTagIds([])}>
-                清除标签
+                {filter === "favorites" ? "收藏" : "Reading List"}
+                <X size={12} />
               </button>
-            </>
-          )}
-          {(filter !== "all" || topicFilter !== "all" || tagIds.length > 0) && (
+            )}
+            {topicFilter !== "all" && (
+              <button
+                className="filter-chip"
+                title="移除主题筛选"
+                onClick={() => chooseTopics("all")}
+              >
+                {topicTitle ||
+                  (topicFilter === "unorganized" ? "待整理" : "研究主题")}
+                <X size={12} />
+              </button>
+            )}
+            {tagIds.map((id) => (
+              <button
+                className="filter-chip"
+                key={id}
+                title="移除关键词筛选"
+                onClick={() => setTagIds((v) => v.filter((x) => x !== id))}
+              >
+                {catalog.data.tags.find((t) => t.id === id)?.name || "标签"}
+                <X size={12} />
+              </button>
+            ))}
+            {tagIds.length > 1 && (
+              <span className="filter-mode">
+                {tagMode === "all" ? "同时满足" : "任一满足"}
+              </span>
+            )}
             <button
               className="text-button"
               onClick={() => {
@@ -415,27 +392,8 @@ export function Library({
             >
               清除全部
             </button>
-          )}
-          <button className="text-button" onClick={() => setAction("tags")}>
-            管理标签
-          </button>
-        </div>
-        <div className="list-meta">
-          <button className="mobile-only" onClick={() => setMobileTopics(true)}>筛选研究主题</button>
-          {mobileTopics && <Modal title="文献筛选" onClose={() => setMobileTopics(false)}><div className="actions">{[['all','全部文献'],['favorites','收藏'],['reading','Reading List']].map(([id,name]) => <button key={id} onClick={() => setFilter(id)}>{name}</button>)}</div><TopicSidebar filter={topicFilter} onFilter={chooseTopics} changed={topicRevision} collapsed={preferences.topicCollapsed || []} onCollapsed={ids=>onPreferences({topicCollapsed:ids})}/><button onClick={() => setMobileTopics(false)}>查看结果</button></Modal>}
-          <span>
-            {title} <strong>{total}</strong>
-          </span>
-          <select
-            aria-label="文献排序"
-            value={order}
-            onChange={(e) => setOrder(e.target.value)}
-          >
-            <option value="recent">最近导入</option>
-            <option value="title">按标题</option>
-            <option value="year">按年份</option>
-          </select>
-        </div>
+          </div>
+        )}
         <Status
           error={error || failure || list.error}
           loading={loading || list.loading}
@@ -465,7 +423,15 @@ export function Library({
             >
               选择全部匹配（{total} 篇）
             </button>
-            <button onClick={() => setTopicSelection(selectionId ? {selectionId} : {paperIds: checked})}>整理论文主题</button>
+            <button
+              onClick={() =>
+                setTopicSelection(
+                  selectionId ? { selectionId } : { paperIds: checked },
+                )
+              }
+            >
+              整理论文主题
+            </button>
             <button
               onClick={() =>
                 perform(async () => {
@@ -489,30 +455,6 @@ export function Library({
             </button>
           </div>
         )}
-        <div className="metadata-list-actions">
-          <button
-            className="text-button"
-            disabled={!total}
-            onClick={() => {
-              setChecked(visible.map((p) => p.id));
-              setSelectionId("");
-            }}
-          >
-            选择当前页
-          </button>
-          <button
-            className="text-button"
-            disabled={!total}
-            onClick={() =>
-              perform(async () => {
-                const r = await allSelection();
-                setMetadataSelection({ paperIds: r.paperIds });
-              })
-            }
-          >
-            补全全部匹配（{total} 篇）
-          </button>
-        </div>
         <div className="paper-list">
           {visible.map((p) => (
             <article
@@ -544,22 +486,42 @@ export function Library({
                   {p.starred && <Star size={13} className="starred" />}
                   <h3 title={p.title}>{p.title}</h3>
                 </div>
-                <p>{p.authors || "作者信息待补充"}</p>
-                <TagChips tags={p.tags || []} onSelect={addFilter} compact />
-                <div className="badges">
-                  <span className={p.translated ? "badge success" : "badge"}>
+                <AuthorLine
+                  authors={p.authors}
+                  year={p.year}
+                  paperId={p.id}
+                />
+                <div className="paper-tags">
+                  {(p.tags || []).slice(0, 3).map((t) => (
+                    <button
+                      className="tag-link"
+                      key={t.id}
+                      title={"筛选：" + t.name}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        addFilter(t);
+                      }}
+                    >
+                      {t.name}
+                    </button>
+                  ))}
+                  {(p.tags || []).length > 3 && (
+                    <span className="tag-more">
+                      +{(p.tags || []).length - 3}
+                    </span>
+                  )}
+                  <span className="asset-state">
                     {p.translated ? "译文可读" : "原文 PDF"}
                   </span>
                   {p.has_analysis_result && (
-                    <span className="badge info">分析已完成</span>
+                    <span className="asset-state">分析已完成</span>
                   )}
                   {p.analysis === "failed" && (
-                    <span className="badge warning">分析失败</span>
+                    <span className="asset-state warn">分析失败</span>
                   )}
                 </div>
               </div>
               <div className="paper-row-aside">
-                <span>{p.year || "—"}</span>
                 <button
                   className={"icon-button " + (p.starred ? "starred" : "")}
                   aria-label={p.starred ? "取消收藏" : "收藏论文"}
@@ -600,6 +562,16 @@ export function Library({
           )}
         </div>
         <div className="pagination">
+          <button
+            className="text-button"
+            disabled={!total}
+            onClick={() => {
+              setChecked(visible.map((p) => p.id));
+              setSelectionId("");
+            }}
+          >
+            选择当前页
+          </button>
           <span>
             {Math.min((page - 1) * 50 + 1, total)}–{Math.min(page * 50, total)}{" "}
             / {total}
@@ -896,9 +868,160 @@ export function Library({
           </div>
         </Modal>
       )}
+      {filtersOpen && (
+        <Modal title="筛选文献" onClose={() => setFiltersOpen(false)} wide>
+          <div className="filter-dialog">
+            <section>
+              <div className="section-label">范围</div>
+              <div className="scope-tabs" role="tablist" aria-label="文献范围">
+                {[
+                  ["all", "全部文献", items.length],
+                  ["favorites", "收藏", items.filter((p) => p.starred).length],
+                  ["reading", "Reading List", reading.data.length],
+                ].map(([id, label, count]: any) => (
+                  <button
+                    role="tab"
+                    aria-selected={filter === id}
+                    className={filter === id ? "active" : ""}
+                    key={id}
+                    onClick={() => setFilter(id)}
+                  >
+                    {label}
+                    <small>{count}</small>
+                  </button>
+                ))}
+              </div>
+            </section>
+            <section>
+              <div className="section-label">研究主题</div>
+              <TopicSidebar
+                filter={topicFilter}
+                onFilter={chooseTopics}
+                changed={topicRevision}
+                collapsed={preferences.topicCollapsed || []}
+                onCollapsed={(ids) => onPreferences({ topicCollapsed: ids })}
+              />
+            </section>
+            <section>
+              <div className="section-label">
+                关键词
+                <button
+                  className="text-button"
+                  onClick={() => {
+                    setFiltersOpen(false);
+                    setAction("tags");
+                  }}
+                >
+                  管理标签
+                </button>
+              </div>
+              <div className="filter-keywords">
+                <select
+                  aria-label="按关键词筛选"
+                  value=""
+                  onChange={(e) => {
+                    const t = catalog.data.tags.find((x) => x.id === e.target.value);
+                    if (t) addFilter(t);
+                  }}
+                >
+                  <option value="">选择标签</option>
+                  {catalog.data.tags.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}（{t.count}）
+                    </option>
+                  ))}
+                </select>
+                {tagIds.length > 1 && (
+                  <select
+                    aria-label="多标签匹配方式"
+                    value={tagMode}
+                    onChange={(e) => setTagMode(e.target.value)}
+                  >
+                    <option value="all">同时满足</option>
+                    <option value="any">任一满足</option>
+                  </select>
+                )}
+                <div className="keyword-chips">
+                  {tagIds.map((id) => (
+                    <button
+                      className="keyword-chip"
+                      key={id}
+                      onClick={() => setTagIds((v) => v.filter((x) => x !== id))}
+                    >
+                      {catalog.data.tags.find((t) => t.id === id)?.name || "标签"}
+                      <X size={12} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </section>
+            <section>
+              <div className="section-label">排序</div>
+              <select
+                aria-label="文献排序（弹窗）"
+                value={order}
+                onChange={(e) => setOrder(e.target.value)}
+              >
+                <option value="recent">最近导入</option>
+                <option value="title">按标题</option>
+                <option value="year">按年份</option>
+              </select>
+            </section>
+          </div>
+          <footer>
+            <button
+              className="text-button"
+              onClick={() => {
+                setFilter("all");
+                chooseTopics("all");
+                setTagIds([]);
+              }}
+            >
+              清除全部
+            </button>
+            <button className="primary" onClick={() => setFiltersOpen(false)}>
+              查看结果（{total} 篇）
+            </button>
+          </footer>
+        </Modal>
+      )}
       {action === "topic-manager" && <TopicManager onClose={() => {setAction(""); setTopicRevision(v => v + 1); list.refresh();}}/>}
       {topicSelection && <TopicBatchDialog selection={topicSelection} onClose={() => setTopicSelection(null)} onChanged={() => {setTopicRevision(v => v + 1); list.refresh();}}/>}
     </div>
+  );
+}
+function AuthorLine({
+  authors,
+  year,
+  paperId,
+}: {
+  authors: string;
+  year: string;
+  paperId: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const value = authors || "作者信息待补充";
+  const long = value.length > 48 || value.split(",").length > 3;
+  return (
+    <p className={"paper-meta" + (expanded ? " expanded" : "")}>
+      <span title={value}>{value}</span>
+      <span className="paper-meta-tail">
+        {year ? `${year}` : ""}
+        {long && (
+          <button
+            className="text-button inline"
+            aria-expanded={expanded}
+            aria-label={(expanded ? "收起作者 " : "展开作者 ") + paperId}
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded((v) => !v);
+            }}
+          >
+            {expanded ? "收起" : "全部作者"}
+          </button>
+        )}
+      </span>
+    </p>
   );
 }
 function EditNotes({

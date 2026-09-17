@@ -359,40 +359,46 @@ export function PaperWorkspace(
       setBusy(false);
     }
   }
+  const modeNav = (
+    <nav className="mode-switch" aria-label="论文工作区">
+      {(["overview", "interpretation", "reader"] as Mode[]).map((tab) => (
+        <button
+          key={tab}
+          className={mode === tab ? "active" : ""}
+          onClick={() => change(tab)}
+        >
+          {tab === "reader" ? (
+            <BookOpen size={16} />
+          ) : tab === "overview" ? (
+            <Sparkles size={16} />
+          ) : (
+            <FileText size={16} />
+          )}{" "}
+          {names[tab]}
+        </button>
+      ))}
+      {returnMode && mode === "reader" && (
+        <button
+          onClick={() => {
+            setSource(null);
+            setMode(returnMode);
+            setReturnMode(null);
+          }}
+        >
+          <ArrowLeft size={16} />
+          返回{names[returnMode]}
+        </button>
+      )}
+    </nav>
+  );
   return (
     <div className="paper-understanding">
-      <nav className="paper-sections" aria-label="论文工作区">
-        {(["overview", "interpretation", "reader"] as Mode[]).map((tab) => (
-          <button
-            key={tab}
-            className={mode === tab ? "active" : ""}
-            onClick={() => change(tab)}
-          >
-            {tab === "reader" ? (
-              <BookOpen size={16} />
-            ) : tab === "overview" ? (
-              <Sparkles size={16} />
-            ) : (
-              <FileText size={16} />
-            )}{" "}
-            {names[tab]}
-          </button>
-        ))}
-        {returnMode && mode === "reader" && (
-          <button
-            onClick={() => {
-              setSource(null);
-              setMode(returnMode);
-              setReturnMode(null);
-            }}
-          >
-            <ArrowLeft size={16} />
-            返回{names[returnMode]}
-          </button>
-        )}
-      </nav>
       {mode === "reader" ? (
-        <DocumentReader {...props} sourceTarget={source || undefined} />
+        <DocumentReader
+          {...props}
+          toolbarLead={modeNav}
+          sourceTarget={source || undefined}
+        />
       ) : (
         <div
           ref={host}
@@ -400,8 +406,8 @@ export function PaperWorkspace(
         >
           <main className="understanding-main">
             <header className="understanding-heading">
-              <div>
-                <span className="eyebrow">{names[mode]}</span>
+              {modeNav}
+              <div className="understanding-title">
                 <h1>{props.paper.title}</h1>
               </div>
               <button

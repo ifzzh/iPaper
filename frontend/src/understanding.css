@@ -4,25 +4,36 @@
   display: flex;
   flex-direction: column;
 }
-.paper-sections {
-  display: flex;
-  gap: 5px;
+.mode-switch {
+  display: inline-flex;
   align-items: center;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--subtle);
+  flex-shrink: 0;
+}
+.mode-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  padding: 5px 9px;
+}
+.mode-switch button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.mode-switch button.active {
   background: var(--surface);
-  flex-wrap: wrap;
-}
-.paper-sections button {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  border-color: transparent;
-}
-.paper-sections .active {
-  background: var(--accent-bg);
   color: var(--accent);
-  font-weight: 650;
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
 }
 .paper-understanding > .reader-workspace,
 .paper-understanding > .structured-workspace {
@@ -47,16 +58,24 @@
   background: var(--surface);
 }
 .understanding-heading {
-  padding: 14px 20px 8px;
+  padding: var(--sp-4) var(--sp-5) var(--sp-3);
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--divider);
+}
+.understanding-title {
+  flex: 1;
+  min-width: 0;
 }
 .understanding-heading h1 {
   font-size: var(--fs-xl);
+  font-weight: 700;
+  color: var(--text-strong);
   line-height: var(--lh-tight);
-  margin: 4px 0;
+  margin: 0;
   overflow-wrap: anywhere;
 }
 .understanding-actions {
