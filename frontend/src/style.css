@@ -59,6 +59,8 @@
   --info: #4b6b8f;
   --info-bg: #eef2f7;
   --info-border: #cdd9e6;
+  --star: #d99a2b;
+  --star-fill: #f6e3bd;
   --highlight: rgba(255, 196, 64, 0.42);
   --highlight-border: #b3760a;
   --highlight-strong: #c58b12;
@@ -151,6 +153,8 @@ html[data-theme="dark"] {
   --info: #a8bdd4;
   --info-bg: #222932;
   --info-border: #3c4a58;
+  --star: #e0b878;
+  --star-fill: rgba(224, 184, 120, 0.22);
   --highlight: rgba(255, 196, 64, 0.32);
   --highlight-border: #d7a443;
   --highlight-strong: #d7a443;
@@ -902,8 +906,8 @@ svg {
   background: var(--accent-soft);
 }
 .starred {
-  color: #d99a2b;
-  fill: #f6e3bd;
+  color: var(--star);
+  fill: var(--star-fill);
 }
 .filter-dialog {
   display: flex;
