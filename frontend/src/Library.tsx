@@ -1006,19 +1006,22 @@ function AuthorLine({
     <p className={"paper-meta" + (expanded ? " expanded" : "")}>
       <span title={value}>{value}</span>
       <span className="paper-meta-tail">
-        {year ? `${year}` : ""}
+        {year && <span>· {year}</span>}
         {long && (
-          <button
-            className="text-button inline"
-            aria-expanded={expanded}
-            aria-label={(expanded ? "收起作者 " : "展开作者 ") + paperId}
-            onClick={(e) => {
-              e.stopPropagation();
-              setExpanded((v) => !v);
-            }}
-          >
-            {expanded ? "收起" : "全部作者"}
-          </button>
+          <>
+            <span aria-hidden="true">·</span>
+            <button
+              className="text-button inline"
+              aria-expanded={expanded}
+              aria-label={(expanded ? "收起作者 " : "展开作者 ") + paperId}
+              onClick={(e) => {
+                e.stopPropagation();
+                setExpanded((v) => !v);
+              }}
+            >
+              {expanded ? "收起" : "全部作者"}
+            </button>
+          </>
         )}
       </span>
     </p>
