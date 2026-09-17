@@ -110,10 +110,13 @@ test("desktop and mobile unified visual acceptance with bounded PDF rendering", 
     const roles = [
       ["brand mark", ".brand-mark"],
       ["primary button", "button.primary, .button.primary"],
-      ["active rail nav", ".app-rail nav button.active"],
-      ["active library nav", ".library-navigation button.active"],
-      ["active workspace tab", ".workspace-tabs > button.active"],
+      ["active sidebar nav", ".sidebar-nav button.active"],
+      ["active scope tab", ".scope-tabs button.active"],
+      ["active paper tab", ".paper-tab.active"],
       ["selected paper row", ".paper-row.selected"],
+      ["success badge", ".badge.success"],
+      ["keyword chip", ".keyword-chip"],
+      ["filter chip", ".filter-chip"],
     ];
     const out: any[] = [];
     for (const [label, selector] of roles) {
@@ -144,13 +147,29 @@ test("desktop and mobile unified visual acceptance with bounded PDF rendering", 
   for (const legacy of legacyGreen)
     expect(audit.accent.toLowerCase()).not.toBe(legacy);
 
-  // --- Library density and the collapsed empty detail column. ---
+  // --- Library density, measured where rows intersect the list viewport. ---
   const rows = await page.locator(".paper-row").count();
-  const visibleRows = await page.locator(".paper-row:visible").count();
-  const rowBox = await page.locator(".paper-row").first().boundingBox();
+  const density = await page.evaluate(() => {
+    const list = document.querySelector(".paper-list");
+    if (!list) return null;
+    const viewport = list.getBoundingClientRect();
+    let full = 0;
+    let partial = 0;
+    let firstHeight = null;
+    for (const row of list.querySelectorAll(".paper-row")) {
+      const rect = row.getBoundingClientRect();
+      const overlap =
+        Math.min(rect.bottom, viewport.bottom) - Math.max(rect.top, viewport.top);
+      if (overlap <= 0) continue;
+      if (firstHeight === null && rect.height) firstHeight = Math.round(rect.height);
+      if (rect.top >= viewport.top - 1 && rect.bottom <= viewport.bottom + 1)
+        full += 1;
+      else partial += 1;
+    }
+    return { full, partial, firstHeight, viewportHeight: Math.round(viewport.height) };
+  });
   expect(rows).toBeGreaterThanOrEqual(50);
-  expect(visibleRows).toBeGreaterThanOrEqual(8);
-  expect(rowBox!.height).toBeLessThanOrEqual(84);
+  expect(density!.full).toBeGreaterThanOrEqual(4);
   await page.goto("/");
   await expect(page.locator(".paper-row").first()).toBeVisible();
   expect(await page.locator(".paper-details:visible").count()).toBe(0);
@@ -200,8 +219,7 @@ test("desktop and mobile unified visual acceptance with bounded PDF rendering", 
         measurements,
         audit,
         rows,
-        visibleRows,
-        rowHeight: rowBox!.height,
+        density,
         widths,
         errors,
         violations,

@@ -20,8 +20,8 @@ test('metadata edit, protected clear, bibliography, batch and responsive details
  await page.reload();await expect(page.locator('.detail-title')).toContainText('A & B');
  expect((await (await page.request.get(`/api/paper/${id}/metadata`)).json()).fields.abstract).toBe('');
  const after=await (await page.request.get(`/api/paper/${id}`)).json();for(const key of ['id','file_path','filename'])expect(after[key]).toEqual(original[key]);
- for(const scheme of ['light','dark'] as const){await page.emulateMedia({colorScheme:scheme});for(const width of [1920,1440,390]){await page.setViewportSize({width,height:1000});await page.screenshot({path:testInfo.outputPath(`${scheme}-${width}-metadata.png`),fullPage:true});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true)}}
- await page.setViewportSize({width:1440,height:1000});await page.getByRole('button',{name:/补全全部匹配/}).click();await expect(page.getByRole('dialog')).toContainText('已入库论文');await page.getByRole('button',{name:'开始补全',exact:true}).click();await expect(page.getByRole('heading',{name:'任务中心',exact:true})).toBeVisible();
+ for(const scheme of ['light','dark'] as const){if((await page.locator('html').getAttribute('data-theme'))!==scheme)await page.getByLabel('切换浅深主题').click();for(const width of [1920,1440,390]){await page.setViewportSize({width,height:1000});await page.screenshot({path:testInfo.outputPath(`${scheme}-${width}-metadata.png`),fullPage:true});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true)}}
+ await page.setViewportSize({width:1440,height:1000});await page.getByRole('button',{name:'选择当前页',exact:true}).click();await page.locator('.batch-toolbar').getByRole('button',{name:'补全信息',exact:true}).click();await expect(page.getByRole('dialog')).toContainText('已入库论文');await page.getByRole('button',{name:'开始补全',exact:true}).click();await expect(page.getByRole('heading',{name:'任务中心',exact:true})).toBeVisible();
  await page.getByRole('button',{name:/论文信息补全/}).first().click();await expect(page.getByRole('dialog')).toContainText('任务日志');
  expect(faults).toEqual([]);
 });

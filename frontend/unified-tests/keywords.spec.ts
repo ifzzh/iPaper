@@ -39,7 +39,10 @@ test("local extraction, correction, filtering, merge undo and responsive library
     .getByRole("button", { name: "组会候选", exact: true })
     .click();
   await expect(page.locator(".paper-row")).toHaveCount(1);
-  await page.getByRole("button", { name: "清除标签", exact: true }).click();
+  await page
+    .locator(".applied-filters")
+    .getByRole("button", { name: /组会候选/ })
+    .click();
   await expect(page.locator(".paper-row")).toHaveCount(6);
   await page
     .locator(".keyword-section")
@@ -75,9 +78,14 @@ test("local extraction, correction, filtering, merge undo and responsive library
       await (await page.request.get("/api/paper/" + pid + "/tags")).json()
     ).tags.some((t: any) => t.id === automatic.id),
   ).toBe(false);
-  await page.getByRole("button", { name: "管理标签", exact: true }).click();
+  await page.getByRole("button", { name: "筛选" }).click();
   await page
     .getByRole("dialog")
+    .getByRole("button", { name: "管理标签", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .last()
     .getByRole("button", { name: /组会候选/ })
     .click();
   await page
@@ -181,17 +189,23 @@ test("server filters and fixed cross-page selection agree beyond one hundred pap
   }
   await page.reload();
   const tags = (await (await page.request.get("/api/tags")).json()).tags;
-  await page
+  await page.getByRole("button", { name: "筛选" }).click();
+  const filters = page.getByRole("dialog");
+  await filters
     .getByLabel("按关键词筛选")
     .selectOption(tags.find((t: any) => t.name === "大样本").id);
-  await page
+  await filters
     .getByLabel("按关键词筛选")
     .selectOption(tags.find((t: any) => t.name === "子样本").id);
+  await filters.getByLabel("多标签匹配方式").selectOption("all");
+  await filters.getByLabel("关闭", { exact: true }).click();
   await expect(page.locator(".pagination")).toContainText("/ 150");
   await expect(page.locator(".paper-row")).toHaveCount(50);
   await page.getByLabel("下一页列表").click();
   await expect(page.locator(".pagination")).toContainText("51–100 / 150");
-  await page.getByLabel("多标签匹配方式").selectOption("any");
+  await page.getByRole("button", { name: "筛选" }).click();
+  await page.getByRole("dialog").getByLabel("多标签匹配方式").selectOption("any");
+  await page.getByRole("dialog").getByLabel("关闭", { exact: true }).click();
   await expect(page.locator(".pagination")).toContainText("/ 250");
   await page.getByRole("button", { name: "选择当前页", exact: true }).click();
   await page
