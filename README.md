@@ -22,7 +22,9 @@ A version number or screen on the development branch does not establish release 
 
 [Release 1.4.0](https://github.com/ifzzh/iPaper/releases/tag/v1.4.0) is deployed and verified. It adds full-document search, outlines and versioned bookmarks, cached paragraph translations in the original PDF, explicit selection translation, and figure/table/formula enlargement. No OCR or model request is triggered by searching or reading cached results. See [reading tools and limits](docs/development/reading-tools.md). That release uses Web 1.4.0 with Workers 1.2.0.
 
-Web 1.8.2 is published and deployed; the release record includes verified image digests and acceptance results.
+Web 1.9.0 is published and deployed; the release record includes verified image digests and acceptance results.
+
+1.9.0 delivers the second UI phase: a collapsible reading-activity calendar (UTC+8 day buckets, midnight splitting, real effective reading minutes and the papers behind each day), fixes Daily arXiv asset state and thumbnail recovery (paper and candidate rows now match by arXiv identity, a missing file never claims "PDF ready", and a recovered cover appears without a full reload), and unifies business dates, Daily update status and interface times to Beijing time (UTC+8) with arXiv announcement batches computed from real US Eastern zone data. See [release status](docs/releases/v1.9.0.md).
 
 1.8.2 closes out the first UI phase: it fixes the squeezed translated/structure reader toolbar, the missing library pagination layout and the theme `color-scheme` fallback after the lazy reader chunk loads, moves research topics back into the single sidebar and removes the duplicate import entry. The bright 1.8.1 composition is unchanged. See [release status](docs/releases/v1.8.2.md).
 
