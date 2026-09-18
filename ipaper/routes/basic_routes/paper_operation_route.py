@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Tupl
 
 from flask import Flask, jsonify, request, send_file
 
+from ipaper.timeutil import epoch_seconds, today_app, utc_iso
 from ipaper.core.base_paper import Paper, PaperUpdateError
 from ipaper.core.paper_store import PaperStore
 from ipaper.database.dao.user_data_dao import ReadingListDAO, ReadingHistoryDAO
@@ -98,7 +99,7 @@ def register_paper_operation_routes(
         pass
 
     def add_to_reading_list(paper_id: str) -> None:
-        ReadingListDAO.add_item(paper_id, datetime.now().isoformat())
+        ReadingListDAO.add_item(paper_id, utc_iso())
 
     def remove_from_reading_list(paper_id: str) -> None:
         ReadingListDAO.remove_item(paper_id)
@@ -529,9 +530,9 @@ def register_paper_operation_routes(
             paper = paper_store.upsert(Paper.from_dict(saved), category_id=category_id, category_path=category_path)
 
             # Update reading history
-            today = datetime.now().strftime("%Y-%m-%d")
+            today = today_app().strftime("%Y-%m-%d")
             duration = int(increment)
-            timestamp = int(datetime.now().timestamp())
+            timestamp = epoch_seconds()
             
             ReadingHistoryDAO.add_history(today, duration, paper_id, timestamp)
 

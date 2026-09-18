@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, Optional, Protocol
 from flask import Flask, jsonify, request
 from werkzeug.utils import secure_filename
 
+from ipaper.timeutil import utc_iso
 from ipaper.core.base_paper import Paper
 from ipaper.core.paper_store import PaperStore
 from ipaper.database.dao.user_data_dao import ReadingListDAO
@@ -73,7 +74,7 @@ def register_upload_from_pdf_routes(
 ) -> None:
     document_client = document_client or DocumentWorkerClient()
     def _add_to_reading_list(paper_id: str) -> None:
-        ReadingListDAO.add_item(paper_id, datetime.now().isoformat())
+        ReadingListDAO.add_item(paper_id, utc_iso())
 
     def _complete_pdf_job(
         task_id: str,
@@ -128,7 +129,7 @@ def register_upload_from_pdf_routes(
                 "filename": target.name,
                 "original_filename": original_filename,
                 "file_path": str(target),
-                "upload_date": datetime.now().isoformat(),
+                "upload_date": utc_iso(),
                 "title": title or os.path.splitext(original_filename)[0],
                 "authors": str(metadata.get("author") or "")[:4096],
                 "subject": str(metadata.get("subject") or "")[:4096],

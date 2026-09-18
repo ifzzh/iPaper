@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from flask import jsonify, request, send_file
 
+from ipaper.timeutil import utc_iso
 from ipaper.core.base_paper import Paper
 from ipaper.core.paper_store import paper_store
 from ipaper.database.dao.settings_dao import SettingsDAO
@@ -264,7 +265,7 @@ def register_agent_summary_routes(
                     "logs": [],
                     "log_lock": threading.Lock(),
                     "process": None,
-                    "start_time": datetime.now().isoformat(),
+                    "start_time": utc_iso(),
                     "result": None,
                 }
 

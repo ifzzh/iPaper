@@ -18,3 +18,10 @@ def on_starting(server):
     from ipaper.runtime.preflight import preflight_environment
 
     preflight_environment()
+
+
+def post_worker_init(worker):
+    """Render Gunicorn's own log lines in UTC+8 after handlers exist."""
+    from ipaper.logging_setup import install_app_logging
+
+    install_app_logging()

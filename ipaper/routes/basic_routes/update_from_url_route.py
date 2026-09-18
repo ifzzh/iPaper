@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ipaper.timeutil import utc_iso
 from ipaper.environment import getenv as brand_getenv
 
 import os
@@ -125,7 +126,7 @@ def register_update_from_url_routes(
 ) -> None:
     document_client = document_client or DocumentWorkerClient()
     def _add_to_reading_list(paper_id: str) -> None:
-        ReadingListDAO.add_item(paper_id, datetime.now().isoformat())
+        ReadingListDAO.add_item(paper_id, utc_iso())
 
 
     @app.route("/api/upload/arxiv", methods=["POST"])
@@ -241,7 +242,7 @@ def register_update_from_url_routes(
                 "filename": filename,
                 "original_filename": filename,
                 "file_path": file_path,
-                "upload_date": datetime.now().isoformat(),
+                "upload_date": utc_iso(),
                 "title": (metadata.get("title") or arxiv_id),
                 "authors": metadata.get("authors", ""),
                 "arxiv_id": arxiv_id,

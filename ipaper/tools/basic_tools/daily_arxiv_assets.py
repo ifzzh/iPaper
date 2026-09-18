@@ -86,7 +86,7 @@ class DailyAssetCoordinator:
             ).fetchone()
             if row is None:
                 return None
-            if row["artifact_status"] == "ready":
+            if row["artifact_status"] == "ready" and not force:
                 return dict(row)
             if row["artifact_status"] in {"queued", "downloading", "validating"}:
                 return dict(row)

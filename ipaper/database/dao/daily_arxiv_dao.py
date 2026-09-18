@@ -5,6 +5,26 @@ from ipaper.security.identity import current_user_id
 
 class DailyArxivDAO:
     @staticmethod
+    def mark_asset_file_missing(arxiv_id: str) -> bool:
+        """Requeue a candidate that claims ``ready`` while its file is gone.
+
+        Owner-scoped and idempotent: only the caller's row is touched, and only
+        when it is currently marked ready. The coordinator then re-fetches the
+        asset through the existing Document Worker path.
+        """
+        db = get_db()
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = db.execute(
+            """UPDATE daily_arxiv_candidates
+               SET artifact_status='retry_wait', next_retry_at=?, artifact_error_code='asset_file_missing',
+                   asset_job_id=NULL, claimed_at=NULL, updated_at=?
+               WHERE owner_id=? AND arxiv_id=? AND artifact_status='ready'""",
+            (now, now, current_user_id(), arxiv_id),
+        )
+        db.commit()
+        return cursor.rowcount == 1
+
+    @staticmethod
     def save_task(date, category, status, metadata=None):
         db = get_db()
         metadata_json = json.dumps(metadata) if metadata else None

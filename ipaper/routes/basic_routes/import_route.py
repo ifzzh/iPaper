@@ -5,6 +5,7 @@ Process from Zotero The function of importing papers
 
 from __future__ import annotations
 
+from ipaper.timeutil import utc_iso
 from ipaper.environment import getenv as brand_getenv
 
 import json
@@ -496,7 +497,7 @@ def register_import_routes(
             task = import_tasks.get(task_id)
             if task:
                 task.update(kwargs)
-                task["last_update"] = datetime.now().isoformat()
+                task["last_update"] = utc_iso()
 
     def _import_papers_task(
         task_id: str, papers_data: List[Dict[str, Any]], target_category_id: str = "", topic_ids=None
@@ -705,7 +706,7 @@ def register_import_routes(
                     filename=pdf_filename,
                     original_filename=pdf_filename,
                     file_path=file_path,
-                    upload_date=datetime.now().isoformat(),
+                    upload_date=utc_iso(),
                     title=paper_info.get("title", ""),
                     authors=paper_info.get("authors", ""),
                     arxiv_id=arxiv_id,
@@ -845,8 +846,8 @@ def register_import_routes(
                 "success_count": 0, "failed_count": 0, "skipped_count": 0,
                 "duplicate_count": 0, "others_count": 0,
                 "message": "Validating Zotero RDF...",
-                "start_time": datetime.now().isoformat(),
-                "last_update": datetime.now().isoformat(), "cancelled": False,
+                "start_time": utc_iso(),
+                "last_update": utc_iso(), "cancelled": False,
             }
         if not _enqueue_import(_validate_rdf_then_import, task_id, target_category_id, topic_ids):
             return jsonify(success=False, error="import_queue_full"), 429
@@ -1016,7 +1017,7 @@ def register_import_routes(
             task["cancelled"] = True
             task["status"] = "cancelling"
             task["message"] = "Canceling import..."
-            task["last_update"] = datetime.now().isoformat()
+            task["last_update"] = utc_iso()
             cancel_document_job = status == "validating"
 
             # If this is the current task, clear the flag
@@ -1091,8 +1092,8 @@ def register_import_routes(
                 "duplicate_count": 0,
                 "others_count": 0,
                 "message": "Validating archive...",
-                "start_time": datetime.now().isoformat(),
-                "last_update": datetime.now().isoformat(),
+                "start_time": utc_iso(),
+                "last_update": utc_iso(),
                 "cancelled": False,
             }
         if not _enqueue_import(_validate_export_then_rebuild, task_id, topic_ids):
@@ -1193,7 +1194,7 @@ def register_import_routes(
                         task["skipped_count"] = skipped_count
                     if duplicate_count is not None:
                         task["duplicate_count"] = duplicate_count
-                    task["last_update"] = datetime.now().isoformat()
+                    task["last_update"] = utc_iso()
 
         success_count = 0
         failed_count = 0
@@ -1320,7 +1321,7 @@ def register_import_routes(
                         title=paper_meta.get("title", ""),
                         authors=paper_meta.get("authors", ""),
                         file_path=pdf_path,
-                        upload_date=paper_meta.get("upload_date") or datetime.now().isoformat(),
+                        upload_date=paper_meta.get("upload_date") or utc_iso(),
                         filename=actual_filename,
                         original_filename=actual_filename,
                         arxiv_url=paper_meta.get("arxiv_url")

@@ -19,6 +19,8 @@ from typing import Any, Callable, Dict, List, Optional, Protocol
 
 from flask import Flask, Response, jsonify, request, send_file
 from werkzeug.utils import secure_filename
+from ipaper.timeutil import now_app, utc_iso
+from ipaper.timeutil import utc_iso
 from ipaper.runtime.task_queue import BoundedExecutor, QueueFull
 from ipaper.security.identity import current_user_id
 
@@ -140,7 +142,7 @@ def register_export_routes(
                 "error": None,
                 "zip_path": None,
                 "options": export_options,
-                "created_at": datetime.now().isoformat(),
+                "created_at": utc_iso(),
             }
         try:
             future = task_executor.submit(
@@ -214,7 +216,7 @@ def register_export_routes(
                 }), 404
         
         # Generate download file name
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = now_app().strftime("%Y%m%d_%H%M%S")
         download_filename = f"iPaper_Export_{timestamp}.zip"
         
         return send_file(

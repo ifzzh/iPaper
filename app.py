@@ -20,7 +20,10 @@ import re
 import requests
 from flask import Flask, current_app, g, jsonify, make_response, redirect, render_template, request
 
+from ipaper.logging_setup import install_app_logging
 from ipaper.workbench import register_workbench, render_workspace
+
+install_app_logging()
 from ipaper.core.base_paper import Paper
 from ipaper.auth import (
     AuthConfig,

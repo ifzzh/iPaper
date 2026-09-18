@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import DefaultDict, Dict, Iterable, List, Optional, Tuple
 
+from ..timeutil import utc_iso
 from ipaper.core.base_paper import Paper
 from ipaper.security.identity import current_user_id
 
@@ -203,7 +204,7 @@ class PaperStore:
     # Status helpers
     # ------------------------------------------------------------------
     def _now_iso(self) -> str:
-        return datetime.utcnow().isoformat()
+        return utc_iso()
 
     def set_translation_status(
         self, paper_id: str, status: str, *, task_id: Optional[str] = None

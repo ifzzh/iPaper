@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
@@ -26,6 +27,7 @@ from ipaper.security.agentic_credentials import AgenticCredentialStore
 from ipaper.security.identity import current_user_id
 from ipaper.security.outbound import OutboundPolicy, OutboundPolicyError
 from ipaper.security.paths import PathSecurityError, ensure_confined, safe_join
+from ipaper.timeutil import APP_TZ_NAME, epoch_seconds, utc_iso
 from ipaper.tools.basic_tools.daily_arxiv import (
     DailyArxivManager,
     build_daily_arxiv_summary_prompt,
@@ -332,7 +334,7 @@ def register_daily_arxiv_routes(
                     if isinstance(x, str) and x.strip()
                 ]
 
-            now_ts = int(datetime.now().timestamp())
+            now_ts = epoch_seconds()
             for arxiv_id in arxiv_ids:
                 DailyArxivReadDAO.mark_read(arxiv_id, now_ts)
             return jsonify({"success": True, "count": len(arxiv_ids)})
@@ -681,7 +683,7 @@ def register_daily_arxiv_routes(
                     if use_temp_dir:
                         try:
                             ReadingListDAO.add_item(
-                                existing_paper.id, datetime.now().isoformat()
+                                existing_paper.id, utc_iso()
                             )
                         except Exception as e:
                             print(f"Failed to add to to-read list: {e}")
@@ -729,7 +731,7 @@ def register_daily_arxiv_routes(
                 filename=pdf_filename,
                 original_filename=pdf_filename,
                 file_path=target_path,
-                upload_date=datetime.now().isoformat(),
+                upload_date=utc_iso(),
                 title=paper_info.get("title", ""),
                 authors=paper_info.get("authors", ""),
                 abstract=paper_info.get("abstract", ""),
@@ -756,7 +758,7 @@ def register_daily_arxiv_routes(
             # If using temp Table of contents, add to to-read list
             if use_temp_dir:
                 try:
-                    ReadingListDAO.add_item(paper.id, datetime.now().isoformat())
+                    ReadingListDAO.add_item(paper.id, utc_iso())
                 except Exception as e:
                     print(f"Failed to add to to-read list: {e}")
 
@@ -990,9 +992,12 @@ def register_daily_arxiv_routes(
     # ========================================
     # Get Thumbnail
     # ========================================
-    # Cache: date+Partition -> Mapping of paper lists
-    _thumbnail_cache = {}
+    # Owner-scoped map of the papers for one date/category. Entries expire so a
+    # preview that appears after a retry is served without restarting.
+    _thumbnail_cache: Dict[str, Dict[str, Any]] = {}
     _thumbnail_cache_lock = threading.Lock()
+    _THUMBNAIL_CACHE_TTL_SECONDS = 60.0
+    _THUMBNAIL_CACHE_MAX_ENTRIES = 32
 
     @app.route("/api/daily-arxiv/clear-thumbnail-cache", methods=["POST"])
     def api_clear_thumbnail_cache():
@@ -1004,55 +1009,65 @@ def register_daily_arxiv_routes(
         except Exception as exc:
             return jsonify({"success": False, "error": str(exc)}), 500
 
+    def _resolve_daily_paper(date_str: str, category: str, arxiv_id: str):
+        """Owner-scoped paper lookup for the thumbnail route.
+
+        The cache key includes the owner, so one user can never be served
+        another user's object, and entries expire quickly so a preview that
+        becomes available after a retry is picked up without a restart.
+        """
+        owner_id = current_user_id()
+        cache_key = f"{owner_id}:{date_str}:{category or 'all'}"
+        now = time.monotonic()
+        with _thumbnail_cache_lock:
+            entry = _thumbnail_cache.get(cache_key)
+            if entry and now - entry["read_at"] < _THUMBNAIL_CACHE_TTL_SECONDS:
+                paper = entry["papers"].get(arxiv_id)
+                if paper is not None:
+                    return paper
+        papers = manager.get_papers_for_date(date_str, category)
+        paper_map = {p.get("arxiv_id"): p for p in papers if p.get("arxiv_id")}
+        with _thumbnail_cache_lock:
+            _thumbnail_cache[cache_key] = {"papers": paper_map, "read_at": now}
+            while len(_thumbnail_cache) > _THUMBNAIL_CACHE_MAX_ENTRIES:
+                oldest_key = next(iter(_thumbnail_cache))
+                del _thumbnail_cache[oldest_key]
+        return paper_map.get(arxiv_id)
+
     @app.route("/api/daily-arxiv/thumbnail/<date_str>/<category>/<arxiv_id>")
     def api_get_thumbnail(date_str: str, category: str, arxiv_id: str):
-        """Get paper thumbnails (with cache optimization)"""
+        """Serve one paper's first-page preview.
+
+        Reads the stored asset only; it never triggers a download or processing.
+        The response is private to the requesting user and the ETag reflects the
+        real file revision, so a preview that appears later is fetched instead of
+        a cached miss.
+        """
         try:
-            # URLdecoding
             from urllib.parse import unquote
 
             category = unquote(category)
             arxiv_id = unquote(arxiv_id)
 
-            # Use caching to avoid repeated reading of the paper list
-            cache_key = f"{date_str}_{category}"
-
-            with _thumbnail_cache_lock:
-                if cache_key not in _thumbnail_cache:
-                    # First request: read and cache the paper list
-                    papers = manager.get_papers_for_date(date_str, category)
-                    # build arxiv_id -> paper mapping
-                    _thumbnail_cache[cache_key] = {
-                        p.get("arxiv_id"): p for p in papers if p.get("arxiv_id")
-                    }
-                    # Limit cache size to keep only the most recent20dates+partitioned data
-                    if len(_thumbnail_cache) > 20:
-                        # Delete the oldest entry
-                        oldest_key = next(iter(_thumbnail_cache))
-                        del _thumbnail_cache[oldest_key]
-
-                paper_map = _thumbnail_cache.get(cache_key, {})
-
-            paper = paper_map.get(arxiv_id)
-
-            # If the paper is not found in the cache, re-read the file system (there may be new papers added during the crawling process)
+            paper = _resolve_daily_paper(date_str, category, arxiv_id)
             if not paper:
-                print(f"[DailyArxiv] Paper not found in cache {arxiv_id}, reread the file system...")
-                papers = manager.get_papers_for_date(date_str, category)
-                # Update cache
-                with _thumbnail_cache_lock:
-                    paper_map = {
-                        p.get("arxiv_id"): p for p in papers if p.get("arxiv_id")
-                    }
-                    _thumbnail_cache[cache_key] = paper_map
-
-                paper = paper_map.get(arxiv_id)
-                if not paper:
-                    return jsonify({"success": False, "error": "Paper not found"}), 404
+                return jsonify({"success": False, "error": "Paper not found"}), 404
 
             thumbnail_path = paper.get("thumbnail_path")
+            asset_status = paper.get("artifact_status")
+            pending = jsonify(
+                {
+                    "success": False,
+                    "error": "thumbnail_pending",
+                    "artifact_status": asset_status,
+                }
+            )
             if not thumbnail_path:
-                return jsonify({"success": False, "error": "Thumbnail does not exist"}), 404
+                # No preview cached yet: never let the browser keep a negative
+                # result, so the image shows up once the asset exists.
+                pending.status_code = 404
+                pending.headers["Cache-Control"] = "no-store"
+                return pending
 
             try:
                 thumbnail_path = ensure_confined(
@@ -1065,18 +1080,25 @@ def register_daily_arxiv_routes(
                 return jsonify({"success": False, "error": "unsafe_stored_path"}), 409
 
             if not thumbnail_path.exists():
-                return jsonify({"success": False, "error": "Thumbnail file does not exist"}), 404
+                pending.status_code = 404
+                pending.headers["Cache-Control"] = "no-store"
+                return pending
 
-            # Add a cache header to let the browser cache the image (7sky)
+            stat = thumbnail_path.stat()
+            etag = f'"{arxiv_id}-{int(stat.st_mtime)}-{stat.st_size}"'
+            if request.headers.get("If-None-Match") == etag:
+                not_modified = app.response_class(status=304)
+                not_modified.headers["ETag"] = etag
+                not_modified.headers["Cache-Control"] = "private, max-age=300"
+                return not_modified
+
             response = send_file(
                 str(thumbnail_path), mimetype="image/jpeg", as_attachment=False
             )
-            response.headers["Cache-Control"] = (
-                "public, max-age=604800"  # 7sky = 7*24*60*60
-            )
-            response.headers["ETag"] = (
-                f'"{arxiv_id}-{date_str}"'  # use arxiv_id and date as ETag
-            )
+            # Per-user asset: private caching only, short enough that a repaired
+            # preview is picked up quickly.
+            response.headers["Cache-Control"] = "private, max-age=300"
+            response.headers["ETag"] = etag
             return response
         except Exception as exc:
             print(f"Failed to get thumbnail: {exc}")
@@ -1125,12 +1147,24 @@ def register_daily_arxiv_routes(
                         "llm_configured": bool(is_llm_configured()),
                         "llm_api_failed": False,
                         "llm_api_error_message": "",
+                        "timezone": APP_TZ_NAME,
                         "last_fetch_time": {},
+                        "last_success_time": {},
+                        "last_check_at": None,
+                        "last_success_at": None,
+                        "next_check_at": None,
+                        "last_errors": {},
                     }
                 )
             last_fetch_time = {}
             for k, v in getattr(manager, "_last_fetch_time", {}).items():
-                last_fetch_time[k] = v.isoformat() if v else None
+                last_fetch_time[k] = utc_iso(v) if v else None
+            last_success_time = {}
+            for k, v in getattr(manager, "_last_success_time", {}).items():
+                last_success_time[k] = utc_iso(v) if v else None
+            last_check_at = getattr(manager, "_last_check_at", None)
+            last_success_at = getattr(manager, "_last_success_at", None)
+            next_check_at = getattr(manager, "_next_check_at", None)
             return jsonify(
                 {
                     "success": True,
@@ -1141,7 +1175,20 @@ def register_daily_arxiv_routes(
                         manager, "_llm_api_error_message", ""
                     )
                     or "",
+                    # Absolute instants stay UTC; the page renders them in UTC+8.
+                    "timezone": APP_TZ_NAME,
+                    "last_check_at": utc_iso(last_check_at) if last_check_at else None,
+                    "last_success_at": (
+                        utc_iso(last_success_at) if last_success_at else None
+                    ),
+                    "next_check_at": utc_iso(next_check_at) if next_check_at else None,
                     "last_fetch_time": last_fetch_time,
+                    "last_success_time": last_success_time,
+                    "last_errors": {
+                        k: v
+                        for k, v in getattr(manager, "_last_error", {}).items()
+                        if v
+                    },
                 }
             )
         except Exception as exc:

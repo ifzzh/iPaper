@@ -7,6 +7,7 @@ import uuid
 from typing import Any, Dict
 
 from flask import Flask, g, jsonify, request, send_from_directory
+from ipaper.timeutil import today_app
 from ipaper.database.dao.settings_dao import SettingsDAO
 from ipaper.security.agentic_credentials import AgenticCredentialStore
 from ipaper.security.credentials import CredentialError
@@ -199,9 +200,8 @@ def register_settings_routes(
             paper_id = data.get("paper_id")  # optional, essayID
 
             if not date:
-                from datetime import datetime
-
-                date = datetime.now().strftime("%Y-%m-%d")
+                # The day bucket is a UTC+8 business date.
+                date = today_app().strftime("%Y-%m-%d")
 
             # Read existing history
             history = SettingsDAO.get_setting('reading_history', {})
@@ -258,7 +258,7 @@ def register_settings_routes(
             history = SettingsDAO.get_setting('reading_history', {})
 
             # Calculate the date range for this week (Monday to today)
-            today = datetime.now().date()
+            today = today_app()
             day_of_week = today.weekday()  # 0 = Monday, 6 = Sunday
             monday = today - timedelta(days=day_of_week)
 

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List
 
+from ...timeutil import now_utc
 from ipaper.core.base_paper import Paper
 from ipaper.core.paper_store import paper_store
 from ipaper.document_worker.client import DocumentWorkerClient
@@ -67,7 +68,7 @@ INPUT: <MARKDOWN>"""
         else:
             system_prompt = en_prompt
 
-    start_time = datetime.now()  # Recording start time
+    start_time = now_utc()  # Recording start time
     with deps.analysis_tasks_lock:
         task_info = deps.analysis_tasks[task_id]
         task_info["status"] = "running"
@@ -430,7 +431,7 @@ INPUT: <MARKDOWN>"""
                 if search_and_update_paper(child):
                     break
 
-        end_time = datetime.now()
+        end_time = now_utc()
         analysis_duration = int((end_time - start_time).total_seconds())
 
         # First try from paper_store Find papers in (supports _ReadingListTemp Table of contents)

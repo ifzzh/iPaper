@@ -19,6 +19,14 @@ import threading
 import time
 import urllib.request
 import uuid
+from ...timeutil import (
+    APP_TZ,
+    arxiv_announce_instant,
+    epoch_seconds,
+    now_utc,
+    today_app,
+    utc_iso,
+)
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
@@ -619,102 +627,48 @@ def should_keep_paper_by_institution_tier(
 
 
 def get_arxiv_announce_date(submitted: datetime = None) -> datetime:
+    """Beijing-time date of the arXiv announcement covering a submission.
+
+    The absolute instant comes from :func:`ipaper.timeutil.arxiv_announce_instant`
+    (US Eastern cutoff/announcement rules with real zone data); this helper only
+    reports which UTC+8 calendar day that announcement reaches users on, which is
+    what the Daily view groups by. Upstream ``published``/``updated`` values are
+    preserved unchanged elsewhere — the announcement batch is never faked from a
+    submission time plus a fixed offset.
     """
+    instant = arxiv_announce_instant(submitted)
+    return datetime.combine(instant.astimezone(APP_TZ).date(), datetime.min.time())
 
-    arXiv Publication time rules:
-    - Eastern Time 14:00(Monday to Friday) One day before announcement 14:00 UTC Previously submitted papers
-    - No publication will be made on weekends. Papers submitted on Friday will be published on the following Monday.
 
-    Time zone conversion:
-    - Daylight Saving Time (3second sunday of month - 11Error 500 (Server Error)!!1500.That’s an error.There was an error. Please try again later.That’s all we know. 14:00 = UTC 18:00 = The next day Beijing time 02:00
-    - Winter Time (other times): Eastern Time 14:00 = UTC 19:00 = The next day Beijing time 03:00
+def classify_daily_asset(
+    *, pdf_downloaded: bool, stored_status: Optional[str], thumbnail_exists: bool
+) -> Dict[str, Any]:
+    """Decide what the Daily view may claim about one paper's assets.
 
-    Attribution of the paper in Beijing Time:
-    - Daylight Saving Time: the day before UTC 18:00 Until the same day UTC 18:00 Papers submitted during the period will be attributed to the same day Beijing time
-    - Winter time: the day before UTC 19:00 Until the same day UTC 19:00 Papers submitted during the period will be attributed to the same day Beijing time
-
-    Args:
-        submitted: Paper submission time (UTC), if None then use the current time
-
-    Returns:
-        The paper is in arXiv Announcement date (Beijing time and date)
+    * a readable local PDF is ``ready``;
+    * a record that says ``ready`` while the file is gone is reported as
+      ``missing`` (never "PDF 已就绪", never a false "获取失败") and is marked
+      for repair;
+    * a missing preview alone does not change the reading status;
+    * no candidate row at all means metadata only.
     """
-    if submitted is None:
-        submitted = datetime.utcnow()
-
-    # If the incoming time is with time zone (offset-aware), converted to UTC naive datetime
-    if submitted.tzinfo is not None:
-        submitted = submitted.replace(tzinfo=None)
-
-    # Determine whether it is daylight saving time (Eastern Time)
-    # Daylight Saving Time:3second sunday of month 02:00 arrive 11first sunday of month 02:00
-    def is_dst(dt):
-        """judge given UTC Whether the corresponding US Eastern Time is Daylight Saving Time"""
-        year = dt.year
-        # 3second sunday of month
-        march = datetime(year, 3, 1)
-        dst_start = march + timedelta(days=(13 - march.weekday()) % 7)
-        while dst_start.day < 8:
-            dst_start += timedelta(days=7)
-        # 11first sunday of month
-        november = datetime(year, 11, 1)
-        dst_end = november + timedelta(days=(6 - november.weekday()) % 7)
-        return dst_start <= dt < dst_end
-
-    # determined release time UTC hours (daylight saving time 18:00, winter time 19:00）
-    publish_hour = 18 if is_dst(submitted) else 19
-
-    # arXiv Release logic (based on Beijing time):
-    # the day before publish_hour Until the same day publish_hour Papers submitted during the period will be published on the corresponding Beijing time and date at the end of the publishing window.
-    #
-    # For example: winter time (publish_hour = 19）
-    #   12moon2day 19:00 UTC arrive 12moon3day 19:00 UTC papers submitted between
-    #   Window end time:12moon3day 19:00 UTC = Beijing time 12moon4day 03:00
-    #   → Attribution to Beijing time 12moon4day
-    #
-    # Another example: Daylight Saving Time (publish_hour = 18）
-    #   5moon2day 18:00 UTC arrive 5moon3day 18:00 UTC papers submitted between
-    #   Window end time:5moon3day 18:00 UTC = Beijing time 5moon4day 02:00
-    #   → Attribution to Beijing time 5moon4day
-
-    # Calculate the Beijing time and date corresponding to the end time of the release window
-    utc_date = submitted.date()
-
-    if submitted.hour >= publish_hour:
-        # Submission time is after the publishing time of the day
-        # The release window ends: the next day publish_hour
-        # For example:12moon2day 20:00 UTC → The window end time is 12moon3day 19:00 UTC
-        window_end_utc = datetime.combine(
-            utc_date + timedelta(days=1), datetime.min.time()
-        ) + timedelta(hours=publish_hour)
-    else:
-        # Submission time is before the publishing time of the day
-        # The publishing window end time is: today's publish_hour
-        # For example:12moon2day 10:00 UTC → The window end time is 12moon2day 19:00 UTC
-        window_end_utc = datetime.combine(utc_date, datetime.min.time()) + timedelta(
-            hours=publish_hour
-        )
-
-    # Convert the window end time to Beijing time and get the paper attribution date
-    window_end_beijing = window_end_utc + timedelta(hours=8)
-    announce_date = window_end_beijing.date()
-
-    # Adjustment to weekends: Saturday and Sunday papers postponed to Monday
-    weekday = announce_date.weekday()
-    if weekday == 5:  # Saturday -> Monday
-        announce_date = announce_date + timedelta(days=2)
-    elif weekday == 6:  # Sunday -> Monday
-        announce_date = announce_date + timedelta(days=1)
-
-    return datetime.combine(announce_date, datetime.min.time())
+    status = stored_status or "retry_wait"
+    inconsistent = False
+    if pdf_downloaded:
+        status = "ready"
+    elif status == "ready":
+        status = "missing"
+        inconsistent = True
+    return {
+        "artifact_status": status,
+        "thumbnail_ready": bool(thumbnail_exists),
+        "asset_record_inconsistent": inconsistent,
+    }
 
 
 def get_today_arxiv_date() -> str:
-    """
-    Get today's date string (YYYY-MM-DD)
-    Use local time
-    """
-    return datetime.now().strftime("%Y-%m-%d")
+    """Today's business date (YYYY-MM-DD) in UTC+8 (Asia/Shanghai)."""
+    return today_app().strftime("%Y-%m-%d")
 
 
 @dataclass
@@ -1040,7 +994,14 @@ class DailyArxivManager:
         self._scheduler_running = False
         self._scheduler_owner_id: Optional[str] = None
         self._scheduler_dispatch_callback = None
+        # Last completed check per category (UTC aware). Kept separate from
+        # `_last_success_time` so a failed run is never reported as an update.
         self._last_fetch_time: Dict[str, datetime] = {}
+        self._last_success_time: Dict[str, datetime] = {}
+        self._last_error: Dict[str, str] = {}
+        self._last_check_at: Optional[datetime] = None
+        self._last_success_at: Optional[datetime] = None
+        self._next_check_at: Optional[datetime] = None
 
         # LLM Configure callback
         self._get_llm_config: Optional[Callable[[], Dict]] = None
@@ -1173,10 +1134,26 @@ class DailyArxivManager:
             local_pdf_path = paper_data.get("file_path")
             paper_data['local_pdf_path'] = local_pdf_path
             paper_data['pdf_downloaded'] = bool(local_pdf_path and os.path.exists(local_pdf_path))
-            if paper_data['pdf_downloaded']:
-                paper_data['artifact_status'] = 'ready'
-            else:
-                paper_data['artifact_status'] = paper_data.get('artifact_status') or 'retry_wait'
+            thumbnail_path = paper_data.get('thumbnail_path')
+            classification = classify_daily_asset(
+                pdf_downloaded=paper_data['pdf_downloaded'],
+                stored_status=paper_data.get('artifact_status'),
+                thumbnail_exists=bool(thumbnail_path and os.path.exists(thumbnail_path)),
+            )
+            paper_data.update(classification)
+            if classification['asset_record_inconsistent']:
+                # The record claims the PDF is ready but the file is gone:
+                # requeue the asset through the existing Document Worker path
+                # instead of telling the user the PDF is available.
+                paper_data['asset_repair_queued'] = False
+                try:
+                    from ...database.dao.daily_arxiv_dao import DailyArxivDAO
+
+                    paper_data['asset_repair_queued'] = DailyArxivDAO.mark_asset_file_missing(
+                        paper_data.get('arxiv_id') or ''
+                    )
+                except Exception as exc:  # noqa: BLE001 - read path must stay usable
+                    print(f"[DailyArxiv] asset repair skipped: {exc}")
             if self._asset_queue_position_callback:
                 paper_data['asset_queue_position'] = self._asset_queue_position_callback(
                     paper_data.get('arxiv_id', '')
@@ -1739,7 +1716,13 @@ class DailyArxivManager:
             if skipped_count > 0:
                 msg += f",jump over {skipped_count} Article already exists"
             progress.set_done(msg)
-            self._last_fetch_time[category] = datetime.now()
+            completed = now_utc()
+            self._last_fetch_time[category] = completed
+            self._last_check_at = completed
+            self._last_error.pop(category, None)
+            if papers:
+                self._last_success_time[category] = completed
+                self._last_success_at = completed
 
             return papers
 
@@ -1748,6 +1731,10 @@ class DailyArxivManager:
             import traceback
 
             traceback.print_exc()
+            failed_at = now_utc()
+            self._last_fetch_time[category] = failed_at
+            self._last_check_at = failed_at
+            self._last_error[category] = str(e)
             progress.set_error(str(e))
             return []
 
@@ -2381,7 +2368,7 @@ class DailyArxivManager:
             'arxiv_url': paper_dict.get('pdf_url') or paper_dict.get('arxiv_url'),
             'arxiv_id': arxiv_id,
             'subject': paper_dict.get('primary_category') or paper_dict.get('subject'),
-            'upload_date': datetime.now().isoformat(),
+            'upload_date': utc_iso(),
             'file_path': paper_dict.get('local_pdf_path') or paper_dict.get('file_path'),
             'thumbnail_path': paper_dict.get('thumbnail_path'),
             'is_daily': 1,
@@ -2496,25 +2483,34 @@ class DailyArxivManager:
         print("[DailyArxiv] Scheduler has stopped")
 
     def _scheduler_loop(self):
-        """scheduler main loop"""
+        """Scheduler main loop.
+
+        The configured interval is respected: this is a periodic check loop, not
+        a fixed daily cron. Check/next-check times are tracked as UTC instants so
+        the status contract can distinguish "checked", "found new papers" and
+        "failed" without relying on the host time zone.
+        """
         # Execute once immediately on startup
         settings = self.get_settings()
         if settings.get("enabled", False):
             self._dispatch_scheduled_fetch()
+            self._last_check_at = now_utc()
 
         while self._scheduler_running:
             settings = self.get_settings()
-            
+
             # Check if enabled
             if not settings.get("enabled", False):
+                self._next_check_at = now_utc() + timedelta(seconds=60)
                 # If disabled, check every minute
                 for _ in range(60):
                     if not self._scheduler_running:
                         return
                     time.sleep(1)
                 continue
-            
+
             interval_minutes = settings.get("checkIntervalMinutes", 10)
+            self._next_check_at = now_utc() + timedelta(minutes=interval_minutes)
 
             # wait
             for _ in range(interval_minutes * 60):
@@ -2524,6 +2520,7 @@ class DailyArxivManager:
 
             # Perform crawling
             self._dispatch_scheduled_fetch()
+            self._last_check_at = now_utc()
 
     def _get_recent_weekdays(self, days: int) -> List[str]:
         """
@@ -2536,7 +2533,7 @@ class DailyArxivManager:
             List of date strings (descending order, newest first)
         """
         dates = []
-        current = datetime.now().date()
+        current = today_app()
         count = 0
 
         # Find working days starting from today and looking forward
@@ -2549,7 +2546,7 @@ class DailyArxivManager:
             # Push forward one day
             current -= timedelta(days=1)
             # Prevent infinite loops (looking up to the next 30 sky)
-            if (datetime.now().date() - current).days > 30:
+            if (today_app() - current).days > 30:
                 break
 
         return dates
@@ -2637,7 +2634,7 @@ class DailyArxivManager:
                 continue  # Already dealt with it today
 
             date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
-            days_ago = (datetime.now().date() - date_obj).days
+            days_ago = (today_app() - date_obj).days
 
             # If the date is not in the existing date list, it needs to be fetched
             if date_str not in available_dates:
