@@ -49,6 +49,24 @@ def _ensure_daily_asset_columns(connection: sqlite3.Connection) -> None:
             )
 
 
+_READING_HISTORY_COLUMNS = {
+    "tick_id": "TEXT",
+    "source": "TEXT NOT NULL DEFAULT 'legacy'",
+}
+
+
+def _ensure_reading_history_columns(connection: sqlite3.Connection) -> None:
+    """Add the idempotency fields used by the UTC+8 reading activity meter."""
+    existing = {
+        row[1] for row in connection.execute("PRAGMA table_info(reading_history)")
+    }
+    for name, declaration in _READING_HISTORY_COLUMNS.items():
+        if name not in existing:
+            connection.execute(
+                f"ALTER TABLE reading_history ADD COLUMN {name} {declaration}"
+            )
+
+
 def init_db_schema(db_path: str = "db/ipaper.db") -> None:
     """Initialize and verify the SQLite schema before serving requests."""
     with sqlite3.connect(db_path) as connection:
@@ -56,6 +74,18 @@ def init_db_schema(db_path: str = "db/ipaper.db") -> None:
         connection.executescript(PROCESSING_SCHEMA)
         _ensure_translation_columns(connection)
         _ensure_daily_asset_columns(connection)
+        _ensure_reading_history_columns(connection)
+        # One row per (owner, tick, business day): a retried request is a no-op
+        # while an interval crossing UTC+8 midnight still writes both days.
+        connection.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_reading_history_tick
+               ON reading_history(owner_id, tick_id, date)
+               WHERE tick_id IS NOT NULL"""
+        )
+        connection.execute(
+            """CREATE INDEX IF NOT EXISTS idx_reading_history_owner_date
+               ON reading_history(owner_id, date)"""
+        )
         connection.execute(
             """CREATE INDEX IF NOT EXISTS idx_daily_candidates_asset_queue
                ON daily_arxiv_candidates(artifact_status, next_retry_at, updated_at)"""

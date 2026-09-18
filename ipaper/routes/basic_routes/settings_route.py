@@ -239,6 +239,57 @@ def register_settings_routes(
         except Exception as exc:
             return jsonify({"success": False, "error": str(exc)}), 500
 
+    @app.route("/api/settings/reading-activity", methods=["GET"])
+    def api_reading_activity():
+        """UTC+8 calendar of effective reading time for the current user.
+
+        Merging and summary rules live in :mod:`ipaper.reading_activity`; this
+        route only gathers the current user's rows.
+        """
+        try:
+            from ipaper.database.dao.user_data_dao import ReadingHistoryDAO
+            from ipaper.reading_activity import activity_payload, activity_range
+            from ipaper.timeutil import APP_TZ_NAME, utc_iso
+
+            try:
+                weeks = int(request.args.get("weeks", 12))
+            except (TypeError, ValueError):
+                weeks = 12
+            weeks = max(1, min(weeks, 53))
+
+            today = today_app()
+            start, _end = activity_range(today, weeks)
+            payload = activity_payload(
+                today=today,
+                weeks=weeks,
+                table_rows=ReadingHistoryDAO.get_activity_since(start.isoformat()),
+                legacy_totals=SettingsDAO.get_setting("reading_history", {}) or {},
+            )
+            return jsonify(
+                {
+                    "success": True,
+                    "timezone": APP_TZ_NAME,
+                    "generatedAt": utc_iso(),
+                    **payload,
+                }
+            )
+        except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    @app.route("/api/settings/reading-activity/papers", methods=["GET"])
+    def api_reading_activity_papers():
+        """Papers read on one UTC+8 day, limited to the current user."""
+        try:
+            from ipaper.database.dao.user_data_dao import ReadingHistoryDAO
+
+            date_str = (request.args.get("date") or "").strip()
+            if not date_str or len(date_str) != 10:
+                return jsonify({"success": False, "error": "invalid_date"}), 400
+            papers = ReadingHistoryDAO.get_day_papers(date_str)
+            return jsonify({"success": True, "date": date_str, "papers": papers})
+        except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)}), 500
+
     @app.route("/api/settings/reading-history/clear", methods=["POST"])
     def api_clear_reading_history():
         """Clear all reading history"""

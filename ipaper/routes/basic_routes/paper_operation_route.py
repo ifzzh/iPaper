@@ -5,12 +5,12 @@ import os
 import re
 import shutil
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Tuple
 
 from flask import Flask, jsonify, request, send_file
 
-from ipaper.timeutil import epoch_seconds, today_app, utc_iso
+from ipaper.timeutil import epoch_seconds, now_utc, today_app, utc_iso
 from ipaper.core.base_paper import Paper, PaperUpdateError
 from ipaper.core.paper_store import PaperStore
 from ipaper.database.dao.user_data_dao import ReadingListDAO, ReadingHistoryDAO
@@ -506,18 +506,47 @@ def register_paper_operation_routes(
 
     @app.route("/api/paper/<paper_id>/read-time", methods=["POST"])
     def api_record_read_time(paper_id: str):
-        """Record paper reading time (cumulative increment)"""
+        """Record effective reading time for one visible, focused reader tick.
+
+        The client sends the interval it measured plus a per-tick id. The server
+        validates ownership and bounds, splits the interval at UTC+8 midnight so
+        a session that crosses midnight is credited to both days, and keeps the
+        per-event table and the legacy day aggregate in step. ``tick_id`` makes
+        a retried request idempotent.
+        """
         try:
-            import json as json_lib
-            import os
-            from datetime import datetime
+            from ipaper.database.dao.settings_dao import SettingsDAO
+            from ipaper.timeutil import split_interval_by_app_day
 
             data = request.json or {}
-            # Use incremental mode
-            increment = data.get("increment", 0)
+            tick_id = data.get("tick_id")
+            if tick_id is not None and (
+                not isinstance(tick_id, str) or not (1 <= len(tick_id) <= 64)
+            ):
+                return jsonify({"success": False, "error": "invalid_tick_id"}), 400
 
-            if not isinstance(increment, (int, float)) or increment <= 0:
-                return jsonify({"success": True, "read_time": 0}), 200
+            seconds = data.get("seconds")
+            if seconds is None:
+                seconds = data.get("increment", 0)
+            if not isinstance(seconds, (int, float)):
+                return jsonify({"success": False, "error": "invalid_seconds"}), 400
+            seconds = float(seconds)
+            # The reader ticks every 30s; anything outside this bound is either a
+            # clock problem or an attempt to inflate the meter.
+            if seconds <= 0 or seconds > 300:
+                return jsonify({"success": False, "error": "invalid_seconds"}), 400
+
+            ended_at = data.get("ended_at")
+            if ended_at is None:
+                end = now_utc()
+            else:
+                try:
+                    end = datetime.fromtimestamp(float(ended_at), timezone.utc)
+                except (TypeError, ValueError, OSError):
+                    return jsonify({"success": False, "error": "invalid_ended_at"}), 400
+            if end > now_utc() + timedelta(minutes=5):
+                return jsonify({"success": False, "error": "invalid_ended_at"}), 400
+            start = end - timedelta(seconds=seconds)
 
             result = find_paper(paper_id)
             if not result:
@@ -525,18 +554,61 @@ def register_paper_operation_routes(
 
             paper, category_path, category_id = result
 
+            already_recorded = bool(tick_id) and ReadingHistoryDAO.has_tick(tick_id)
+
             from ipaper.database.dao.paper_dao import PaperDAO
-            saved = PaperDAO.patch_state(paper_id, {}, increments={'read_time': int(increment)})
-            paper = paper_store.upsert(Paper.from_dict(saved), category_id=category_id, category_path=category_path)
 
-            # Update reading history
-            today = today_app().strftime("%Y-%m-%d")
-            duration = int(increment)
-            timestamp = epoch_seconds()
-            
-            ReadingHistoryDAO.add_history(today, duration, paper_id, timestamp)
+            if not already_recorded:
+                saved = PaperDAO.patch_state(
+                    paper_id, {}, increments={"read_time": int(round(seconds))}
+                )
+                paper = paper_store.upsert(
+                    Paper.from_dict(saved),
+                    category_id=category_id,
+                    category_path=category_path,
+                )
+                buckets = split_interval_by_app_day(start, end)
+                for date_str, minutes in buckets:
+                    ReadingHistoryDAO.add_history(
+                        date_str,
+                        minutes * 60.0,
+                        paper_id,
+                        int(end.timestamp()),
+                        tick_id=tick_id,
+                        source="reader",
+                    )
+                # Keep the legacy day aggregate aligned with the event rows.
+                if buckets:
+                    history = SettingsDAO.get_setting("reading_history", {}) or {}
+                    for date_str, minutes in buckets:
+                        entry = history.get(date_str)
+                        if isinstance(entry, dict):
+                            entry["total"] = float(entry.get("total", 0)) + minutes
+                            papers = entry.setdefault("papers", [])
+                            if paper_id not in papers:
+                                papers.append(paper_id)
+                        elif isinstance(entry, (int, float)):
+                            history[date_str] = {
+                                "total": float(entry) + minutes,
+                                "papers": [paper_id],
+                            }
+                        else:
+                            history[date_str] = {"total": minutes, "papers": [paper_id]}
+                    SettingsDAO.save_setting("reading_history", history)
+            else:
+                paper = paper_store.upsert(
+                    Paper.from_dict(PaperDAO.get_paper(paper_id)),
+                    category_id=category_id,
+                    category_path=category_path,
+                )
 
-            return jsonify({"success": True, "read_time": paper.read_time})
+            return jsonify(
+                {
+                    "success": True,
+                    "read_time": paper.read_time,
+                    "duplicate": already_recorded,
+                }
+            )
 
         except Exception as exc:  # noqa: BLE001
             print(f"Failed to record reading time: {exc}")

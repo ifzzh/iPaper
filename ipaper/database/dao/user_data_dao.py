@@ -4,26 +4,79 @@ from ipaper.security.identity import current_user_id
 
 class ReadingHistoryDAO:
     @staticmethod
-    def add_history(date, duration, paper_id, timestamp):
+    def add_history(date, duration, paper_id, timestamp, tick_id=None, source="reader"):
+        """Append one reading interval row (owner scoped).
+
+        ``tick_id`` makes the write idempotent: the unique index on
+        (owner_id, tick_id, date) turns a retried request into a no-op while an
+        interval that crosses UTC+8 midnight still writes one row per day.
+        """
         db = get_db()
-        db.execute('INSERT INTO reading_history (date,duration,paper_id,timestamp,owner_id) VALUES (?,?,?,?,?)',
-                   (date, duration, paper_id, timestamp, current_user_id()))
+        if tick_id:
+            db.execute(
+                "INSERT OR IGNORE INTO reading_history"
+                " (date,duration,paper_id,timestamp,owner_id,tick_id,source)"
+                " VALUES (?,?,?,?,?,?,?)",
+                (date, duration, paper_id, timestamp, current_user_id(), tick_id, source),
+            )
+        else:
+            db.execute(
+                "INSERT INTO reading_history"
+                " (date,duration,paper_id,timestamp,owner_id,source)"
+                " VALUES (?,?,?,?,?,?)",
+                (date, duration, paper_id, timestamp, current_user_id(), source),
+            )
         db.commit()
 
     @staticmethod
-    def get_history(limit=None):
+    def get_activity_since(since_date):
+        """Per-day totals and distinct papers for the current owner.
+
+        ``duration`` is stored in seconds; rows written before the UTC+8 change
+        keep their original date key and are never shifted.
+        """
         db = get_db()
-        sql = 'SELECT * FROM reading_history WHERE owner_id=? ORDER BY timestamp DESC'
-        if limit:
-            sql += f' LIMIT {limit}'
-        rows = db.execute(sql, (current_user_id(),)).fetchall()
+        rows = db.execute(
+            "SELECT date,"
+            "       SUM(duration) AS seconds,"
+            "       COUNT(DISTINCT paper_id) AS papers,"
+            "       COUNT(paper_id) AS attributed_rows"
+            "  FROM reading_history"
+            " WHERE owner_id=? AND date>=?"
+            " GROUP BY date"
+            " ORDER BY date",
+            (current_user_id(), since_date),
+        ).fetchall()
         return [dict(row) for row in rows]
-        
+
     @staticmethod
-    def get_history_by_date(date):
+    def get_day_papers(date):
+        """Distinct papers with a recorded interval on one UTC+8 day.
+
+        Owner scoped through the joining papers table, so a shared day key can
+        never expose another user's titles.
+        """
         db = get_db()
-        rows = db.execute('SELECT * FROM reading_history WHERE date=? AND owner_id=?', (date, current_user_id())).fetchall()
+        rows = db.execute(
+            "SELECT DISTINCT h.paper_id AS paper_id, p.title AS title, p.arxiv_id AS arxiv_id"
+            "  FROM reading_history h"
+            "  LEFT JOIN papers p ON p.id = h.paper_id AND p.owner_id = h.owner_id"
+            " WHERE h.owner_id=? AND h.date=? AND h.paper_id IS NOT NULL"
+            " ORDER BY title",
+            (current_user_id(), date),
+        ).fetchall()
         return [dict(row) for row in rows]
+
+    @staticmethod
+    def has_tick(tick_id):
+        if not tick_id:
+            return False
+        db = get_db()
+        row = db.execute(
+            "SELECT 1 FROM reading_history WHERE owner_id=? AND tick_id=? LIMIT 1",
+            (current_user_id(), tick_id),
+        ).fetchone()
+        return bool(row)
 
 class ReadingListDAO:
     @staticmethod
