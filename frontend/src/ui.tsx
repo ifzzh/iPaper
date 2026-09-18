@@ -88,33 +88,54 @@ export async function upload(
     throw new ApiError(r.status, data.error || "request_failed");
   return data;
 }
-export function useResource<T>(path: string | null, initial: T) {
+export function useResource<T>(path: string | null, initial: T, timeoutMs = 30000) {
   const [data, setData] = useState(initial),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(false),
+    [loaded, setLoaded] = useState(false),
     [revision, refresh] = useState(0);
+  // Only the newest request may write state. Without this, an aborted poll
+  // (or a superseded refresh) could leave `loading` stuck on forever, which is
+  // what made the topic sidebar spin while its tree was already rendered.
+  const sequence = useRef(0);
   useEffect(() => {
     if (!path) return;
-    const c = new AbortController();
+    const id = ++sequence.current;
+    const controller = new AbortController();
+    let disposed = false;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
     setLoading(true);
     setError("");
-    api<T>(path, "GET", undefined, c.signal)
+    api<T>(path, "GET", undefined, controller.signal)
       .then((value) => {
-        if (!c.signal.aborted) setData(value);
+        if (disposed || id !== sequence.current) return;
+        setData(value);
+        setLoaded(true);
       })
       .catch((e) => {
-        if (!c.signal.aborted) setError(errorText(e));
+        if (disposed || id !== sequence.current) return;
+        setError(timedOut ? "请求超时，请重试。" : errorText(e));
       })
       .finally(() => {
-        if (!c.signal.aborted) setLoading(false);
+        clearTimeout(timer);
+        if (!disposed && id === sequence.current) setLoading(false);
       });
-    return () => c.abort();
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [path, revision]);
   return {
     data,
     setData,
     error,
     loading,
+    loaded,
     refresh: () => refresh((n) => n + 1),
   };
 }

@@ -145,6 +145,7 @@ export function Library({
     [page, setPage] = useState(1),
     [order, setOrder] = useState("recent"),
     [action, setAction] = useState(""),
+    [keywordRevision, setKeywordRevision] = useState(0),
     [failure, setFailure] = useState(""),
     [busy, setBusy] = useState(false),
     [checked, setChecked] = useState<string[]>([]),
@@ -221,6 +222,8 @@ export function Library({
   function changedKeywords() {
     list.refresh();
     catalog.refresh();
+    // Bump a revision so the selected paper's keyword panel refetches too.
+    setKeywordRevision((v) => v + 1);
   }
   function addFilter(tag: Tag) {
     setTagIds((v) => (v.includes(tag.id) ? v : [...v, tag.id]));
@@ -703,6 +706,7 @@ export function Library({
             </section>
             <PaperTopics key={paper.id + ":topics"} paperId={paper.id} onChanged={() => {setTopicRevision(v => v + 1); list.refresh();}}/>
             <PaperKeywords
+              revision={keywordRevision}
               key={paper.id + ":tags"}
               id={paper.id}
               onFilter={addFilter}

@@ -16,22 +16,41 @@ export function TopicSidebar({ filter, onFilter, changed, collapsed = [], onColl
   const [manage, setManage] = useState(false);
   const selected = filter.startsWith("topic:") ? filter.slice(6).split(",") : [];
   function toggle(id: string) {const next = selected.includes(id) ? selected.filter(t => t !== id) : [...selected, id]; onFilter(next.length ? "topic:" + next.join(",") : "all");}
-  useEffect(() => { data.refresh(); }, [changed]);
+  // Refresh when an action reports a change. The first run is skipped: the hook
+  // already fetches on mount, and the extra call doubled every initial load.
+  const firstChange = useRef(true);
+  useEffect(() => {
+    if (firstChange.current) {
+      firstChange.current = false;
+      return;
+    }
+    data.refresh();
+  }, [changed]);
   useEffect(() => {
     if(!selected.length) return;
     const redirects=data.data.redirects || {};
     const next=Array.from(new Set(selected.flatMap(id => id in redirects ? redirects[id] ? [redirects[id]!] : [] : [id])));
     if(next.join()!==selected.join()) onFilter(next.length ? 'topic:'+next.join(',') : 'all');
   }, [data.data]);
-  useEffect(() => {const timer=setInterval(data.refresh,5000); return () => clearInterval(timer);}, []);
+  useEffect(() => {
+    // Background organisation can add topics, but a 5s poll of an always-mounted
+    // sidebar piled requests up and flashed the blocking spinner. Poll slowly,
+    // only while the tab is visible and never while a request is in flight.
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (data.loading) return;
+      data.refresh();
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [data.loading]);
   function visible(t: Topic) {let parent=t.parent_id; for(let i=0;parent && i<12;i++){if(collapsed.includes(parent)) return false; parent=data.data.topics.find(n=>n.id===parent)?.parent_id || null;}return true;}
   return <>
     <div className="section-label">研究主题 {filter !== "all" && <button onClick={() => onFilter("all")}>清除筛选</button>} <button className="icon-button" aria-label="管理主题" onClick={() => setManage(true)}><Settings2 size={15}/></button></div>
-    <Status loading={data.loading} error={data.error} retry={data.refresh}/>
+    <Status loading={data.loading && !data.loaded} error={data.error} retry={data.refresh}/>
     <nav className="category-tree" aria-label="研究主题">
       <div className={"category-row" + (filter === "unorganized" ? " active" : "")}><button onClick={() => onFilter("unorganized")}><Folder size={16}/><span>待整理</span><small>{data.data.unorganized}</small></button></div>
       {ordered(data.data.topics).filter(({topic})=>visible(topic)).map(({ topic, depth }) => <div key={topic.id} className={"category-row topic-row depth-" + Math.min(depth, 4) + (selected.includes(topic.id) ? " active" : "")}>{data.data.topics.some(n=>n.parent_id===topic.id) && <button className="topic-collapse" aria-label={(collapsed.includes(topic.id)?"展开主题 ":"折叠主题 ")+topic.name} onClick={()=>onCollapsed(collapsed.includes(topic.id)?collapsed.filter(id=>id!==topic.id):[...collapsed,topic.id])}>{collapsed.includes(topic.id)?"▸":"▾"}</button>}<input type="checkbox" aria-label={"组合主题 " + topic.name} checked={selected.includes(topic.id)} onChange={() => toggle(topic.id)}/><button onClick={() => onFilter("topic:" + topic.id)}><Folder size={16}/><span>{topic.name}</span><small>{topic.count}</small></button></div>)}
-      {!data.loading && !data.data.topics.length && <p className="muted">尚无研究主题。整理已入库论文后会形成有依据的方向，也可手动创建。</p>}
+      {data.loaded && !data.data.topics.length && <p className="muted">尚无研究主题。整理已入库论文后会形成有依据的方向，也可手动创建。</p>}
     </nav>
     {manage && <TopicManager onClose={() => { setManage(false); data.refresh(); }}/ >}
   </>;

@@ -1,16 +1,13 @@
 import base from "./playwright.config";
 import { defineConfig } from "@playwright/test";
+
+// Focused suite for the topic sidebar loading behaviour. It runs on its own
+// server so the assertions do not depend on the account/view state left behind
+// by the long shared unified sequence.
 export default defineConfig({
   ...base,
   testDir: "./unified-tests",
-  testIgnore: [
-    "topics-loading.spec.ts",
-    "structured.spec.ts",
-    "understanding.spec.ts",
-    "reading-tools.spec.ts",
-    "metadata.spec.ts",
-    "keywords.spec.ts",
-  ],
+  testMatch: ["topics-loading.spec.ts"],
   use: {
     ...base.use,
     launchOptions: {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, X, Tags, Sparkles, Undo2, Pencil, Trash2 } from "lucide-react";
 import { api, useResource, Modal, Field, Status, dateText } from "./ui";
 import { errorText } from "./api";
@@ -107,11 +107,13 @@ function Undo({ id, onDone }: { id: string; onDone: () => void }) {
 
 export function PaperKeywords({
   id,
+  revision = 0,
   onFilter,
   onChanged,
   onTasks,
 }: {
   id: string;
+  revision?: number;
   onFilter: (t: Tag) => void;
   onChanged: () => void;
   onTasks: () => void;
@@ -126,8 +128,24 @@ export function PaperKeywords({
     [busy, setBusy] = useState(false),
     [operation, setOperation] = useState(""),
     [generate, setGenerate] = useState(false);
+  // Refresh when the surface that can change this paper's tags (tag manager,
+  // batch dialog, topic actions) reports a change, plus a slow background poll
+  // for server-side organisation. Polling alone used to be the only path, so
+  // every rename took seconds to appear.
+  const firstRevision = useRef(true);
   useEffect(() => {
-    const timer = setInterval(resource.refresh, 4000);
+    if (firstRevision.current) {
+      firstRevision.current = false;
+      return;
+    }
+    resource.refresh();
+  }, [revision]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (resource.loading) return;
+      resource.refresh();
+    }, 30000);
     return () => clearInterval(timer);
   }, [id]);
   async function edit(action: string, tagId?: string) {
