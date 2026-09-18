@@ -1,0 +1,224 @@
+import { useMemo, useState } from "react";
+import { CalendarDays, ChevronRight } from "lucide-react";
+import { api, dateText, useResource, Status, APP_TIME_ZONE_LABEL } from "./ui";
+
+type ActivityDay = {
+  date: string;
+  minutes: number;
+  papers: number;
+  papersKnown: boolean;
+  legacy: boolean;
+  future: boolean;
+  today: boolean;
+};
+
+type ActivityPayload = {
+  timezone: string;
+  generatedAt: string;
+  range: { start: string; end: string; weeks: number };
+  summary: { totalMinutes: number; weekMinutes: number; readingDays: number };
+  days: ActivityDay[];
+};
+
+const WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
+
+/** Intensity buckets; the legend states them so colour is never the only cue. */
+function levelOf(minutes: number) {
+  if (minutes < 0.1) return 0;
+  if (minutes < 15) return 1;
+  if (minutes < 30) return 2;
+  if (minutes < 60) return 3;
+  return 4;
+}
+
+function label(day: ActivityDay) {
+  const parts = [`${dateText(day.date)}`, `${Math.round(day.minutes)} 分钟`];
+  if (day.minutes > 0) {
+    parts.push(day.papersKnown ? `${day.papers} 篇论文` : "篇数未记录");
+  }
+  if (day.legacy) parts.push("历史仅记录总时长");
+  if (day.future) parts.push("未来日期");
+  return parts.join(" · ");
+}
+
+export function ReadingActivity({ compact = false }: { compact?: boolean }) {
+  const [weeks, setWeeks] = useState(12);
+  const [selected, setSelected] = useState<string>("");
+  const resource = useResource<ActivityPayload | null>(
+    `/api/settings/reading-activity?weeks=${weeks}`,
+    null,
+  );
+  const detail = useResource<any>(
+    selected ? `/api/settings/reading-activity/papers?date=${selected}` : null,
+    null,
+  );
+  const data = resource.data;
+
+  const columns = useMemo(() => {
+    const days = data?.days || [];
+    const result: ActivityDay[][] = [];
+    for (let index = 0; index < days.length; index += 7) {
+      result.push(days.slice(index, index + 7));
+    }
+    return result;
+  }, [data]);
+
+  const monthLabels = useMemo(() => {
+    let last = "";
+    return columns.map((column) => {
+      const month = column[0]?.date.slice(0, 7) || "";
+      if (month && month !== last) {
+        last = month;
+        return `${Number(month.slice(5, 7))}月`;
+      }
+      return "";
+    });
+  }, [columns]);
+
+  const summary = data?.summary;
+
+  return (
+    <section className={"reading-activity" + (compact ? " compact" : "")}>
+      <header className="reading-activity-head">
+        <div>
+          <h3>
+            <CalendarDays size={16} /> 阅读活动
+          </h3>
+          <p className="muted">
+            仅统计活动、可见且正文已加载的阅读区；日期与时间为{APP_TIME_ZONE_LABEL}。
+          </p>
+        </div>
+        <div className="reading-activity-range" role="group" aria-label="时间范围">
+          <button
+            className={weeks === 12 ? "active" : ""}
+            aria-pressed={weeks === 12}
+            onClick={() => setWeeks(12)}
+          >
+            近 12 周
+          </button>
+          <button
+            className={weeks === 53 ? "active" : ""}
+            aria-pressed={weeks === 53}
+            onClick={() => setWeeks(53)}
+          >
+            近一年
+          </button>
+        </div>
+      </header>
+
+      <Status
+        error={resource.error}
+        loading={resource.loading && !data}
+        retry={resource.refresh}
+      />
+
+      {summary && (
+        <p className="reading-activity-summary">
+          <span>
+            累计 <strong>{Math.round(summary.totalMinutes)}</strong> 分钟
+          </span>
+          <span>
+            本周 <strong>{Math.round(summary.weekMinutes)}</strong> 分钟
+          </span>
+          <span>
+            阅读 <strong>{summary.readingDays}</strong> 天
+          </span>
+        </p>
+      )}
+
+      {data && (
+        <div className="reading-activity-scroll">
+          <div className="reading-activity-grid-wrap">
+            <div className="reading-activity-months" aria-hidden="true">
+              <span className="reading-activity-spacer" />
+              {monthLabels.map((text, index) => (
+                <span key={index}>{text}</span>
+              ))}
+            </div>
+            <div className="reading-activity-body">
+              <div className="reading-activity-weekdays" aria-hidden="true">
+                {WEEKDAYS.map((day, index) => (
+                  <span key={day}>{index % 2 === 0 ? day : ""}</span>
+                ))}
+              </div>
+              <div
+                className="reading-activity-grid"
+                role="grid"
+                aria-label={`近 ${weeks === 53 ? "一年" : "12 周"}每日有效阅读分钟数`}
+              >
+                {columns.map((column, columnIndex) => (
+                  <div className="reading-activity-column" key={columnIndex}>
+                    {column.map((day) => (
+                      <button
+                        key={day.date}
+                        type="button"
+                        role="gridcell"
+                        className={[
+                          "heat-cell",
+                          `level-${levelOf(day.minutes)}`,
+                          day.today ? "today" : "",
+                          day.future ? "future" : "",
+                          selected === day.date ? "selected" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        aria-label={label(day)}
+                        title={label(day)}
+                        onClick={() => setSelected(day.date)}
+                        onFocus={() => setSelected(day.date)}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="reading-activity-legend">
+        <span>少</span>
+        {[0, 1, 2, 3, 4].map((level) => (
+          <i key={level} className={`heat-cell level-${level}`} aria-hidden="true" />
+        ))}
+        <span>多</span>
+        <small>0 / &lt;15 / &lt;30 / &lt;60 / ≥60 分钟</small>
+      </div>
+
+      {selected && (
+        <div className="reading-activity-detail">
+          <header>
+            <strong>{dateText(selected)}</strong>
+            <button
+              className="text-button"
+              onClick={() => setSelected("")}
+              aria-label="关闭日期详情"
+            >
+              关闭
+            </button>
+          </header>
+          {detail.loading && !detail.data && <p className="muted">正在读取当天论文…</p>}
+          {detail.error && <p role="alert">{detail.error}</p>}
+          {detail.data?.papers?.length ? (
+            <ul>
+              {detail.data.papers.map((paper: any) => (
+                <li key={paper.paper_id}>
+                  <a href={`/?paper=${encodeURIComponent(paper.paper_id)}`}>
+                    {paper.title || paper.arxiv_id || paper.paper_id}
+                    <ChevronRight size={13} />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">
+              {detail.data && !detail.data.papers?.length
+                ? "这一天只有累计时长，没有逐篇记录。"
+                : "没有可回看的论文记录。"}
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}

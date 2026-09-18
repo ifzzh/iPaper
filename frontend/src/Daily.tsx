@@ -136,7 +136,7 @@ export function Daily({
           Daily arXiv 尚未启用。<button onClick={onSettings}>前往设置</button>
         </div>
       )}
-      <div className="daily-run-status">
+      <div className="daily-run-status daily-scheduler-status">
         <span>
           {scheduler.data.is_running ? "自动更新已启动" : "自动更新未启动"}
         </span>

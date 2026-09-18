@@ -1,11 +1,8 @@
 import { KeywordSettings } from "./Keywords";
 import { StructuredSettings } from "./Processing";
 import { UnderstandingSettings } from "./Understanding";
-import {
-  QualitySettings,
-  Institutions,
-  ReadingHistory,
-} from "./DiscoverySettings";
+import { QualitySettings, Institutions } from "./DiscoverySettings";
+import { ReadingActivity } from "./ReadingActivity";
 import { useEffect, useState } from "react";
 import {
   Settings as SettingsIcon,
@@ -315,7 +312,7 @@ export function Settings({
         )}
         {tab === "account" && profile.data && (
           <>
-            <ReadingHistory />
+            <ReadingActivity />
             <section className="settings-card">
               <h3>个人资料</h3>
               <Field label="显示名称">

@@ -777,15 +777,18 @@ function StructureContent(
         document.hasFocus() &&
         !(chat && matchMedia("(max-width:640px)").matches)
       ) {
+        // One request per effective 30s tick. The server splits it at UTC+8
+        // midnight, validates ownership and dedupes by tick_id; the legacy day
+        // aggregate is updated server-side so the two stores cannot fork.
+        const tickId =
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
         void api(
           `/api/paper/${encodeURIComponent(paper.id)}/read-time`,
           "POST",
-          { increment: 30 },
+          { seconds: 30, tick_id: tickId, ended_at: Date.now() / 1000 },
         ).catch(() => {});
-        void api("/api/settings/reading-history/record", "POST", {
-          minutes: 0.5,
-          paper_id: paper.id,
-        }).catch(() => {});
       }
     }, 30000);
     return () => clearInterval(timer);

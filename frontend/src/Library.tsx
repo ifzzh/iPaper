@@ -15,6 +15,7 @@ import { TranslationDialog } from "./Processing";
 import { ResizeHandle } from "./ResizeHandle";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
+import { ReadingActivity } from "./ReadingActivity";
 import {
   Library as LibraryIcon,
   Star,
@@ -39,7 +40,8 @@ import {
   SlidersHorizontal,
   X,
   ArrowUpRight,
-} from "lucide-react";
+  Activity,
+  ChevronDown,} from "lucide-react";
 import { type Paper, paperFrom, errorText } from "./api";
 import {
   api,
@@ -305,6 +307,26 @@ export function Library({
             </button>
           ))}
         </div>
+        <section className="library-activity">
+          <button
+            className="library-activity-toggle"
+            aria-expanded={!!preferences.readingActivityOpen}
+            onClick={() =>
+              onPreferences({ readingActivityOpen: !preferences.readingActivityOpen })
+            }
+          >
+            <Activity size={15} />
+            阅读活动
+            <span className="muted">
+              {preferences.readingActivityOpen ? "收起" : "查看每日有效阅读时长"}
+            </span>
+            <ChevronDown
+              size={15}
+              className={preferences.readingActivityOpen ? "open" : ""}
+            />
+          </button>
+          {preferences.readingActivityOpen && <ReadingActivity compact />}
+        </section>
         <div className="list-toolbar">
           <label className="search">
             <Search size={16} />
