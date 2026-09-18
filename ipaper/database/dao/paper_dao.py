@@ -202,18 +202,23 @@ class PaperDAO:
         params = [current_user_id(), date]
         rows = db.execute(sql, params).fetchall()
         papers = [PaperDAO._row_to_dict(row) for row in rows]
-        candidates = {
-            row['arxiv_id']: dict(row)
-            for row in db.execute(
-                'SELECT * FROM daily_arxiv_candidates WHERE owner_id=? AND release_date=?',
-                (current_user_id(), date),
-            ).fetchall()
-        }
+        from ipaper.tools.basic_tools.daily_arxiv import normalize_arxiv_id
+
+        candidates = {}
+        for row in db.execute(
+            'SELECT * FROM daily_arxiv_candidates WHERE owner_id=? AND release_date=?',
+            (current_user_id(), date),
+        ).fetchall():
+            record = dict(row)
+            candidates[normalize_arxiv_id(record['arxiv_id'])] = record
         for paper in papers:
-            candidate = candidates.get(paper.get('arxiv_id'))
+            candidate = candidates.get(normalize_arxiv_id(paper.get('arxiv_id')))
             if not candidate:
                 continue
             paper.update({
+                # The candidate key keeps its version suffix; the repair and
+                # retry paths need it to address the right row.
+                'candidate_arxiv_id': candidate['arxiv_id'],
                 'artifact_status': candidate['artifact_status'],
                 'asset_retry_count': candidate['retry_count'],
                 'asset_next_retry_at': candidate['next_retry_at'],

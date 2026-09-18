@@ -18,8 +18,8 @@ class DailyArxivDAO:
             """UPDATE daily_arxiv_candidates
                SET artifact_status='retry_wait', next_retry_at=?, artifact_error_code='asset_file_missing',
                    asset_job_id=NULL, claimed_at=NULL, updated_at=?
-               WHERE owner_id=? AND arxiv_id=? AND artifact_status='ready'""",
-            (now, now, current_user_id(), arxiv_id),
+               WHERE owner_id=? AND (arxiv_id=? OR arxiv_id LIKE ? || 'v%' OR arxiv_id LIKE '%/' || ? OR arxiv_id LIKE '%/' || ? || 'v%') AND artifact_status='ready'""",
+            (now, now, current_user_id(), arxiv_id, arxiv_id, arxiv_id, arxiv_id),
         )
         db.commit()
         return cursor.rowcount == 1
@@ -94,8 +94,12 @@ class DailyArxivDAO:
 
     @staticmethod
     def get_candidate(arxiv_id):
+        """Look up a candidate, tolerating a missing or extra version suffix."""
+        if not arxiv_id:
+            return None
         row = get_db().execute(
-            "SELECT * FROM daily_arxiv_candidates WHERE owner_id=? AND arxiv_id=?",
-            (current_user_id(), arxiv_id),
+            "SELECT * FROM daily_arxiv_candidates WHERE owner_id=? AND "
+            + "(arxiv_id=? OR arxiv_id LIKE ? || 'v%' OR arxiv_id LIKE '%/' || ? OR arxiv_id LIKE '%/' || ? || 'v%')",
+            (current_user_id(), arxiv_id, arxiv_id, arxiv_id, arxiv_id),
         ).fetchone()
         return dict(row) if row else None

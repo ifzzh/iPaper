@@ -121,5 +121,121 @@ class AssetRepairRequeueTests(unittest.TestCase):
         self.assertEqual(rows[owner_two], "ready")
 
 
+class VersionTolerantCandidateLookupTests(unittest.TestCase):
+    """A paper keeps the bare arXiv id while the candidate keeps `vN`."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.db = Path(self.temp.name) / "ipaper.db"
+        init_db_schema(str(self.db))
+        self.owner = "00000000-0000-0000-0000-000000000001"
+        self.other = "00000000-0000-0000-0000-000000000002"
+        with sqlite3.connect(self.db) as connection:
+            connection.execute(
+                """INSERT INTO daily_arxiv_candidates
+                   (owner_id,arxiv_id,release_date,artifact_status,retry_count,updated_at)
+                   VALUES (?,?,?,?,?,?)""",
+                (self.owner, "2609.19915v1", "2026-09-18", "ready", 0,
+                 "2026-09-18T00:00:00+00:00"),
+            )
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_normaliser_keeps_the_category_prefix(self):
+        from ipaper.tools.basic_tools.daily_arxiv import normalize_arxiv_id
+
+        self.assertEqual(normalize_arxiv_id("2609.19915v1"), "2609.19915")
+        self.assertEqual(normalize_arxiv_id("2609.19915"), "2609.19915")
+        self.assertEqual(normalize_arxiv_id("cs/0601001v2"), "cs/0601001")
+        self.assertEqual(normalize_arxiv_id(None), "")
+
+    def test_sql_predicate_matches_both_forms(self):
+        with sqlite3.connect(self.db) as connection:
+            predicate = (
+                "(arxiv_id=? OR arxiv_id LIKE ? || 'v%' OR arxiv_id LIKE '%/' || ?"
+                " OR arxiv_id LIKE '%/' || ? || 'v%')"
+            )
+            for candidate in ("2609.19915", "2609.19915v1"):
+                found = connection.execute(
+                    f"SELECT arxiv_id FROM daily_arxiv_candidates WHERE owner_id=? AND {predicate}",
+                    (self.owner, candidate, candidate, candidate, candidate),
+                ).fetchone()
+                self.assertEqual(found[0], "2609.19915v1", candidate)
+
+    def test_repair_addresses_the_versioned_row(self):
+        with sqlite3.connect(self.db) as connection:
+            predicate = (
+                "(arxiv_id=? OR arxiv_id LIKE ? || 'v%' OR arxiv_id LIKE '%/' || ?"
+                " OR arxiv_id LIKE '%/' || ? || 'v%')"
+            )
+            connection.execute(
+                f"""UPDATE daily_arxiv_candidates
+                    SET artifact_status='retry_wait', artifact_error_code='asset_file_missing'
+                    WHERE owner_id=? AND {predicate} AND artifact_status='ready'""",
+                (self.owner, "2609.19915", "2609.19915", "2609.19915", "2609.19915"),
+            )
+            row = connection.execute(
+                "SELECT artifact_status,artifact_error_code FROM daily_arxiv_candidates"
+            ).fetchone()
+            self.assertEqual(row, ("retry_wait", "asset_file_missing"))
+
+    def test_other_owner_is_not_matched(self):
+        with sqlite3.connect(self.db) as connection:
+            predicate = (
+                "(arxiv_id=? OR arxiv_id LIKE ? || 'v%' OR arxiv_id LIKE '%/' || ?"
+                " OR arxiv_id LIKE '%/' || ? || 'v%')"
+            )
+            found = connection.execute(
+                f"SELECT 1 FROM daily_arxiv_candidates WHERE owner_id=? AND {predicate}",
+                (self.other, "2609.19915", "2609.19915", "2609.19915", "2609.19915"),
+            ).fetchone()
+            self.assertIsNone(found)
+
+
+def test_dao_lookup_and_repair_ignore_the_version_suffix(tmp_path, monkeypatch):
+    """The DAO itself must resolve both arXiv id forms, owner scoped."""
+    from contextlib import contextmanager
+
+    from ipaper.database.connection import get_db
+    from ipaper.database.dao.daily_arxiv_dao import DailyArxivDAO
+    from ipaper.security.identity import (
+        Identity,
+        reset_background_identity,
+        set_background_identity,
+    )
+    from tests.workbench_support import make_workbench_fixture
+
+    @contextmanager
+    def run_as(identity):
+        token = set_background_identity(identity)
+        try:
+            yield
+        finally:
+            reset_background_identity(token)
+
+    app, one, two = make_workbench_fixture(tmp_path, monkeypatch)
+    with app.app_context():
+        with run_as(Identity(one["id"], "reader_one", "admin")):
+            db = get_db()
+            db.execute(
+                """INSERT INTO daily_arxiv_candidates
+                   (owner_id,arxiv_id,release_date,artifact_status,retry_count,updated_at)
+                   VALUES (?,?,?,?,?,?)""",
+                (one["id"], "2609.19915v1", "2026-09-18", "ready", 0,
+                 "2026-09-18T00:00:00+00:00"),
+            )
+            db.commit()
+            candidate = DailyArxivDAO.get_candidate("2609.19915")
+            assert candidate is not None
+            assert candidate["arxiv_id"] == "2609.19915v1"
+            assert DailyArxivDAO.mark_asset_file_missing("2609.19915") is True
+            repaired = DailyArxivDAO.get_candidate("2609.19915")
+            assert repaired["artifact_status"] == "retry_wait"
+            assert repaired["artifact_error_code"] == "asset_file_missing"
+        with run_as(Identity(two["id"], "reader_two", "user")):
+            assert DailyArxivDAO.get_candidate("2609.19915") is None
+
+
 if __name__ == "__main__":
     unittest.main()

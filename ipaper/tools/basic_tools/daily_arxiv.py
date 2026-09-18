@@ -640,6 +640,22 @@ def get_arxiv_announce_date(submitted: datetime = None) -> datetime:
     return datetime.combine(instant.astimezone(APP_TZ).date(), datetime.min.time())
 
 
+def normalize_arxiv_id(value: Any) -> str:
+    """Strip an arXiv version suffix for identity comparisons.
+
+    Daily rows are stored with the announced version (``2609.19915v1``) while the
+    paper row keeps the bare id (``2609.19915``), and older rows may carry a
+    slash form. Matching must ignore those differences or the asset state and
+    the paper record silently disagree.
+    """
+    text = str(value or "").strip().lower().replace(" ", "")
+    if not text:
+        return ""
+    import re as _re
+
+    return _re.sub(r"v\d+$", "", text)
+
+
 def classify_daily_asset(
     *, pdf_downloaded: bool, stored_status: Optional[str], thumbnail_exists: bool
 ) -> Dict[str, Any]:
@@ -1150,7 +1166,9 @@ class DailyArxivManager:
                     from ...database.dao.daily_arxiv_dao import DailyArxivDAO
 
                     paper_data['asset_repair_queued'] = DailyArxivDAO.mark_asset_file_missing(
-                        paper_data.get('arxiv_id') or ''
+                        paper_data.get('candidate_arxiv_id')
+                        or paper_data.get('arxiv_id')
+                        or ''
                     )
                 except Exception as exc:  # noqa: BLE001 - read path must stay usable
                     print(f"[DailyArxiv] asset repair skipped: {exc}")

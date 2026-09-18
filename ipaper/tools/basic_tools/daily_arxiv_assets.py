@@ -81,11 +81,15 @@ class DailyAssetCoordinator:
         now = self._now()
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT * FROM daily_arxiv_candidates WHERE owner_id=? AND arxiv_id=?",
-                (owner_id, arxiv_id),
+                "SELECT * FROM daily_arxiv_candidates WHERE owner_id=? AND "
+                "(arxiv_id=? OR arxiv_id LIKE ? || 'v%' OR arxiv_id LIKE '%/' || ?"
+                " OR arxiv_id LIKE '%/' || ? || 'v%')",
+                (owner_id, arxiv_id, arxiv_id, arxiv_id, arxiv_id),
             ).fetchone()
             if row is None:
                 return None
+            # Address the row by its stored key from here on.
+            arxiv_id = row["arxiv_id"]
             if row["artifact_status"] == "ready" and not force:
                 return dict(row)
             if row["artifact_status"] in {"queued", "downloading", "validating"}:
