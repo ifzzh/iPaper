@@ -2683,10 +2683,21 @@ progress {
 
 .daily-run-status {
   display: flex;
-  gap: 16px;
-  font-size: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  font-size: var(--fs-2xs);
   color: var(--muted);
-  margin-bottom: 12px;
+  margin-bottom: var(--sp-3);
+}
+.daily-times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: var(--muted);
+}
+.daily-time-zone {
+  color: var(--faint);
 }
 
 .pdf-scroll {

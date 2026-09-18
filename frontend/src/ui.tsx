@@ -290,21 +290,78 @@ export function Field({
     </label>
   );
 }
-export function dateText(value: string) {
-  if (!value) return "—";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime()))
-    return /^\d{4}-\d{2}-\d{2}/.exec(value)?.[0] || "—";
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+// Business time is UTC+8 (Asia/Shanghai). Absolute instants are stored as UTC
+// or epoch seconds; legacy naive timestamps were written by a UTC server, so
+// they are read back as UTC instead of the viewer's local zone.
+export const APP_TIME_ZONE = "Asia/Shanghai";
+export const APP_TIME_ZONE_LABEL = "北京时间（UTC+8）";
+
+function asDate(value: unknown): Date | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value === "number") {
+    const ms = Math.abs(value) < 1e12 ? value * 1000 : value;
+    const fromNumber = new Date(ms);
+    return Number.isNaN(fromNumber.getTime()) ? null : fromNumber;
+  }
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/.test(raw)
+    ? raw
+    : raw.replace(" ", "T") + "Z";
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
-export function timestampText(value: string) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${dateText(value)} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+
+const DATE_FORMAT = new Intl.DateTimeFormat("zh-CN", {
+  timeZone: APP_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const TIME_FORMAT = new Intl.DateTimeFormat("zh-CN", {
+  timeZone: APP_TIME_ZONE,
+  hourCycle: "h23",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+});
+
+function formatParts(format: Intl.DateTimeFormat, value: Date) {
+  return Object.fromEntries(
+    format.formatToParts(value).map((part) => [part.type, part.value]),
+  );
 }
+
+/** Date in UTC+8. Date-only strings keep their bibliographic date semantics. */
+export function dateText(value: unknown): string {
+  if (typeof value === "string") {
+    const raw = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  }
+  const parsed = asDate(value);
+  if (!parsed)
+    return typeof value === "string" && value
+      ? (/^\d{4}-\d{2}-\d{2}/.exec(value)?.[0] ?? "—")
+      : "—";
+  const p = formatParts(DATE_FORMAT, parsed);
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+/** Date and time in UTC+8. */
+export function timestampText(value: unknown): string {
+  const parsed = asDate(value);
+  if (!parsed) return "—";
+  const t = formatParts(TIME_FORMAT, parsed);
+  return `${dateText(parsed)} ${t.hour}:${t.minute}:${t.second}`;
+}
+
+/** True when the value can be rendered as a meaningful instant. */
+export function hasInstant(value: unknown): boolean {
+  return asDate(value) !== null;
+}
+
 export function Confirm({
   title,
   detail,

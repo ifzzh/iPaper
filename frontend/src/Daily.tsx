@@ -14,6 +14,9 @@ import {
   Status,
   Confirm,
   dateText,
+  timestampText,
+  hasInstant,
+  APP_TIME_ZONE_LABEL,
   Modal,
   Markdown,
 } from "./ui";
@@ -51,6 +54,10 @@ export function Daily({
     ),
     settings = useResource<any>("/api/settings/daily-arxiv", {}),
     scheduler = useResource<any>("/api/daily-arxiv/scheduler/status", {});
+  const dailyErrors = Object.values(
+    (scheduler.data.last_errors || {}) as Record<string, string>,
+  );
+  const [coverVersions, setCoverVersions] = useState<Record<string, number>>({});
   const visible = (papers.data.papers || []).filter((p: any) =>
     (p.title + " " + p.abstract).toLowerCase().includes(query.toLowerCase()),
   );
@@ -133,8 +140,26 @@ export function Daily({
         <span>
           {scheduler.data.is_running ? "自动更新已启动" : "自动更新未启动"}
         </span>
-        {scheduler.data.last_fetch_time && (
-          <span>最近更新：{dateText(scheduler.data.last_fetch_time)}</span>
+        <span className="daily-times">
+          <span>
+            最近检查：
+            {hasInstant(scheduler.data.last_check_at)
+              ? timestampText(scheduler.data.last_check_at)
+              : "本次启动后尚未检查"}
+          </span>
+          <span>
+            最近成功更新：
+            {hasInstant(scheduler.data.last_success_at)
+              ? timestampText(scheduler.data.last_success_at)
+              : "暂无（未获取到新论文不是故障）"}
+          </span>
+          {scheduler.data.is_running && hasInstant(scheduler.data.next_check_at) && (
+            <span>下次检查：{timestampText(scheduler.data.next_check_at)}</span>
+          )}
+          <span className="daily-time-zone">{APP_TIME_ZONE_LABEL}</span>
+        </span>
+        {dailyErrors.length > 0 && (
+          <span role="alert">最近检查失败：{dailyErrors[0]}</span>
         )}
         {scheduler.data.llm_api_error && (
           <span role="alert">模型服务连接异常，请检查设置。</span>
@@ -206,6 +231,9 @@ export function Daily({
               date={date}
               category={p.fetch_category || p.category || category}
               id={p.arxiv_id}
+              status={p.artifact_status}
+              thumbnailReady={!!p.thumbnail_ready}
+              coverVersion={coverVersions[p.arxiv_id] || 0}
             />
             <div className="daily-card-body">
               <div className="badges">
@@ -215,8 +243,13 @@ export function Daily({
                 <span className="badge">
                   {p.category || p.categories?.[0] || "arXiv"}
                 </span>
-                <span className="badge">
-                  {p.artifact_status === "ready" ? "PDF 已就绪" : "文献元数据"}
+                <span
+                  className={
+                    "badge" +
+                    (p.artifact_status === "failed" ? " danger" : "")
+                  }
+                >
+                  {artifactLabels[p.artifact_status] || "仅元数据"}
                 </span>
               </div>
               <button className="card-title" onClick={() => setSelected(p)}>
@@ -244,9 +277,11 @@ export function Daily({
                 >
                   <Plus size={16} />
                 </button>
-                {p.artifact_status === "failed" && (
+                {p.artifact_status !== "ready" && (
                   <button
+                    disabled={busy === "retry:" + p.arxiv_id}
                     onClick={async () => {
+                      setBusy("retry:" + p.arxiv_id);
                       try {
                         await api(
                           "/api/daily-arxiv/papers/" +
@@ -255,13 +290,21 @@ export function Daily({
                           "POST",
                           {},
                         );
+                        // A retried cover must not reuse the browser's cached
+                        // failure, so the image is remounted with a new version.
+                        setCoverVersions((v) => ({
+                          ...v,
+                          [p.arxiv_id]: (v[p.arxiv_id] || 0) + 1,
+                        }));
                         papers.refresh();
                       } catch (e) {
                         setError(errorText(e));
+                      } finally {
+                        setBusy("");
                       }
                     }}
                   >
-                    重试 PDF
+                    {p.artifact_status === "failed" ? "重试获取 PDF" : "重新获取"}
                   </button>
                 )}
               </div>
@@ -339,28 +382,87 @@ export function Daily({
     </section>
   );
 }
+// Status text shared by the card badge and the cover placeholder. Keys mirror
+// the artifact_status values the API reports.
+const artifactLabels: Record<string, string> = {
+  ready: "PDF 已就绪",
+  candidate: "PDF 待获取",
+  queued: "PDF 排队中",
+  downloading: "PDF 获取中",
+  validating: "PDF 校验中",
+  retry_wait: "PDF 获取中",
+  missing: "文件缺失，已重新获取",
+  failed: "PDF 获取失败",
+};
+
+const PENDING_STATUSES = new Set([
+  "candidate",
+  "queued",
+  "downloading",
+  "validating",
+  "retry_wait",
+]);
+
 function DailyImage({
   date,
   category,
   id,
+  status,
+  thumbnailReady,
+  coverVersion,
 }: {
   date: string;
   category: string;
   id: string;
+  status?: string;
+  thumbnailReady?: boolean;
+  coverVersion?: number;
 }) {
   const [failed, setFailed] = useState(false);
-  return failed ? (
-    <div className="daily-cover-placeholder">
-      <ImageOff size={24} />
-      <strong>{category || "arXiv"}</strong>
-      <small>缩略图暂不可用</small>
-    </div>
-  ) : (
+  const [attempt, setAttempt] = useState(0);
+  const src = `/api/daily-arxiv/thumbnail/${encodeURIComponent(date)}/${encodeURIComponent(category || "all")}/${encodeURIComponent(id)}?v=${coverVersion || 0}-${attempt}`;
+
+  // Reset when the paper, date, cover version or asset state changes: a preview
+  // that becomes available later must be retried, not remembered as failed.
+  useEffect(() => {
+    setFailed(false);
+    setAttempt(0);
+  }, [id, date, category, coverVersion, thumbnailReady, status]);
+
+  // Bounded automatic retry while the asset is still being fetched.
+  useEffect(() => {
+    if (!failed || !PENDING_STATUSES.has(status || "")) return;
+    if (attempt >= 2) return;
+    const timer = setTimeout(() => {
+      setFailed(false);
+      setAttempt((v) => v + 1);
+    }, 4000 + attempt * 8000);
+    return () => clearTimeout(timer);
+  }, [failed, attempt, status]);
+
+  if (failed) {
+    return (
+      <div className="daily-cover-placeholder">
+        <ImageOff size={24} />
+        <strong>{category || "arXiv"}</strong>
+        <small>
+          {PENDING_STATUSES.has(status || "")
+            ? "封面生成中，稍后自动重试"
+            : status === "missing"
+              ? "文件缺失，正在重新获取"
+              : status === "failed"
+                ? "封面获取失败，可手动重试"
+                : "暂无封面"}
+        </small>
+      </div>
+    );
+  }
+  return (
     <img
       className="daily-cover"
       alt="论文首页预览"
       loading="lazy"
-      src={`/api/daily-arxiv/thumbnail/${encodeURIComponent(date)}/${encodeURIComponent(category || "all")}/${encodeURIComponent(id)}`}
+      src={src}
       onError={() => setFailed(true)}
     />
   );
