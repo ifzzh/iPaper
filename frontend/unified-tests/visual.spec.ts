@@ -174,6 +174,64 @@ test("desktop and mobile unified visual acceptance with bounded PDF rendering", 
   await expect(page.locator(".paper-row").first()).toBeVisible();
   expect(await page.locator(".paper-details:visible").count()).toBe(0);
 
+  // Expanding is a persisted toggle and the calendar needs its data: retry the
+  // click a bounded number of times and wait for the grid, not the legend.
+  const openActivity = async () => {
+    await expect(page.locator(".library-activity-toggle")).toBeVisible({ timeout: 20000 });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (await page.locator(".reading-activity-scroll").isVisible().catch(() => false)) return;
+      await page.locator(".library-activity-toggle").click();
+      if (await page.locator(".reading-activity-scroll").isVisible().catch(() => false)) return;
+      await page.waitForTimeout(600);
+    }
+    await expect(page.locator(".reading-activity-scroll")).toBeVisible({ timeout: 20000 });
+  };
+
+  // --- Reading activity: the calendar fills its column and stays on-screen. ---
+  await openActivity();
+  await expect(page.locator(".reading-activity .heat-cell").first()).toBeVisible();
+  const heat = await page.evaluate(() => {
+    const wrap = document.querySelector(".reading-activity-grid-wrap");
+    const grid = document.querySelector(".reading-activity-grid");
+    const cell = document.querySelector(".reading-activity .heat-cell");
+    const card = document.querySelector(".reading-activity");
+    const scroll = document.querySelector(".reading-activity-scroll");
+    return {
+      weeks: Number(getComputedStyle(wrap!).getPropertyValue("--heat-weeks")),
+      wrapWidth: wrap!.getBoundingClientRect().width,
+      cardWidth: card!.getBoundingClientRect().width,
+      gridWidth: grid!.getBoundingClientRect().width,
+      cellWidth: cell!.getBoundingClientRect().width,
+      scrollable: scroll!.scrollWidth > scroll!.clientWidth + 1,
+      pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
+    };
+  });
+  expect(heat.weeks).toBeGreaterThanOrEqual(52);
+  expect(heat.cellWidth).toBeGreaterThanOrEqual(9);
+  // Fills (or scrolls within) the card without spilling off the page.
+  expect(heat.wrapWidth).toBeLessThanOrEqual(heat.cardWidth + 1);
+  expect(heat.wrapWidth).toBeGreaterThan(heat.cardWidth * 0.6);
+  expect(heat.pageOverflow).toBeLessThanOrEqual(1);
+
+  // --- Mobile: a year of squares scrolls inside the component only. ---
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await openActivity();
+  await expect(page.locator(".reading-activity .heat-cell").first()).toBeVisible();
+  const mobileHeat = await page.evaluate(() => {
+    const cell = document.querySelector(".reading-activity .heat-cell");
+    const scroll = document.querySelector(".reading-activity-scroll");
+    return {
+      cellWidth: cell!.getBoundingClientRect().width,
+      scrollable: scroll!.scrollWidth > scroll!.clientWidth + 1,
+      pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
+    };
+  });
+  expect(mobileHeat.cellWidth).toBeGreaterThanOrEqual(9);
+  expect(mobileHeat.scrollable).toBe(true);
+  expect(mobileHeat.pageOverflow).toBeLessThanOrEqual(1);
+
+
   // --- Intermediate width and no horizontal overflow in either theme. ---
   const widths: any[] = [];
   for (const width of [1280, 390]) {

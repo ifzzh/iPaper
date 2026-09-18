@@ -1,3 +1,4 @@
+import type React from "react";
 import { useMemo, useState } from "react";
 import { CalendarDays, ChevronRight } from "lucide-react";
 import { api, dateText, useResource, Status, APP_TIME_ZONE_LABEL } from "./ui";
@@ -20,8 +21,6 @@ type ActivityPayload = {
   days: ActivityDay[];
 };
 
-const WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
-
 /** Intensity buckets; the legend states them so colour is never the only cue. */
 function levelOf(minutes: number) {
   if (minutes < 0.1) return 0;
@@ -42,7 +41,9 @@ function label(day: ActivityDay) {
 }
 
 export function ReadingActivity({ compact = false }: { compact?: boolean }) {
-  const [weeks, setWeeks] = useState(12);
+  // A full year is the default so the calendar reads like GitHub's graph and
+  // fills the content column; 12 weeks stays one click away.
+  const [weeks, setWeeks] = useState(53);
   const [selected, setSelected] = useState<string>("");
   const resource = useResource<ActivityPayload | null>(
     `/api/settings/reading-activity?weeks=${weeks}`,
@@ -74,6 +75,9 @@ export function ReadingActivity({ compact = false }: { compact?: boolean }) {
       return "";
     });
   }, [columns]);
+
+  // GitHub shows every other weekday label: Mon, Wed, Fri.
+  const weekdayLabels = ["一", "", "三", "", "五", "", ""];
 
   const summary = data?.summary;
 
@@ -128,17 +132,23 @@ export function ReadingActivity({ compact = false }: { compact?: boolean }) {
 
       {data && (
         <div className="reading-activity-scroll">
-          <div className="reading-activity-grid-wrap">
+          <div
+            className="reading-activity-grid-wrap"
+            style={{ "--heat-weeks": columns.length } as React.CSSProperties}
+          >
             <div className="reading-activity-months" aria-hidden="true">
-              <span className="reading-activity-spacer" />
-              {monthLabels.map((text, index) => (
-                <span key={index}>{text}</span>
-              ))}
+              {monthLabels.map((text, index) =>
+                text ? (
+                  <span key={index} style={{ gridColumn: index + 1 }}>
+                    {text}
+                  </span>
+                ) : null,
+              )}
             </div>
             <div className="reading-activity-body">
               <div className="reading-activity-weekdays" aria-hidden="true">
-                {WEEKDAYS.map((day, index) => (
-                  <span key={day}>{index % 2 === 0 ? day : ""}</span>
+                {weekdayLabels.map((day, index) => (
+                  <span key={index}>{day}</span>
                 ))}
               </div>
               <div
@@ -177,12 +187,12 @@ export function ReadingActivity({ compact = false }: { compact?: boolean }) {
       )}
 
       <div className="reading-activity-legend">
+        <small>0 / &lt;15 / &lt;30 / &lt;60 / ≥60 分钟</small>
         <span>少</span>
         {[0, 1, 2, 3, 4].map((level) => (
           <i key={level} className={`heat-cell level-${level}`} aria-hidden="true" />
         ))}
         <span>多</span>
-        <small>0 / &lt;15 / &lt;30 / &lt;60 / ≥60 分钟</small>
       </div>
 
       {selected && (

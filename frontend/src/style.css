@@ -64,6 +64,7 @@
   --heat-3: #c9bce8;
   --heat-4: #b19ddc;
   --heat-ring: rgba(87, 87, 209, 0.45);
+  --heat-border: rgba(21, 23, 28, 0.06);
   --star: #d99a2b;
   --star-fill: #f6e3bd;
   --highlight: rgba(255, 196, 64, 0.42);
@@ -173,6 +174,7 @@ html[data-theme="dark"] {
   --heat-3: #534c7d;
   --heat-4: #6f65a6;
   --heat-ring: rgba(166, 168, 240, 0.55);
+  --heat-border: rgba(255, 255, 255, 0.05);
   --star: #e0b878;
   --star-fill: rgba(224, 184, 120, 0.22);
   --highlight: rgba(255, 196, 64, 0.32);
@@ -1025,7 +1027,7 @@ svg {
 .category-row:focus-within > .icon-button {
   opacity: 1;
 }
-/* --- Reading activity heat map ------------------------------------------ */
+/* --- Reading activity heat map (GitHub-like contribution graph) ---------- */
 .library-activity {
   padding: 0 var(--sp-6) var(--sp-3);
 }
@@ -1053,8 +1055,19 @@ svg {
   margin-top: var(--sp-3);
   border: 1px solid var(--divider);
   border-radius: var(--r-md);
-  padding: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
   background: var(--surface);
+}
+/* The settings page renders the same component inside the card column, so it
+   must line up with the neighbouring cards above and below. */
+.settings-page .reading-activity {
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  padding: var(--sp-5);
+  margin-bottom: var(--sp-4);
+  width: 100%;
+  box-sizing: border-box;
 }
 .reading-activity-head {
   display: flex;
@@ -1102,7 +1115,7 @@ svg {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 18px;
-  margin: var(--sp-3) 0 var(--sp-2);
+  margin: var(--sp-4) 0 var(--sp-3);
   font-size: var(--fs-2xs);
   color: var(--muted);
 }
@@ -1114,21 +1127,26 @@ svg {
   overflow-x: auto;
   padding-bottom: 4px;
 }
+/* Fluid like GitHub's graph: columns share the available width (capped so a
+   short range does not blow the squares up), and grow to 1fr down to a
+   readable minimum where the row scrolls instead. */
 .reading-activity-grid-wrap {
-  display: inline-block;
-  min-width: 100%;
+  width: 100%;
+  /* Fills the content column (like the surrounding cards) and stops the
+     squares from growing past a sane size when a short range is selected. */
+  max-width: calc(var(--heat-weeks, 53) * 24px);
+  margin: 0 auto;
 }
 .reading-activity-months {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(var(--heat-weeks, 53), minmax(10px, 1fr));
   gap: 3px;
-  margin-left: 22px;
+  margin: 0 0 4px 22px;
+  height: 15px;
   font-size: var(--fs-2xs);
   color: var(--faint);
-  height: 16px;
 }
 .reading-activity-months > span {
-  width: 13px;
-  flex: 0 0 13px;
   white-space: nowrap;
   overflow: visible;
 }
@@ -1137,48 +1155,53 @@ svg {
   gap: 6px;
 }
 .reading-activity-weekdays {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: repeat(7, minmax(0, 1fr));
   gap: 3px;
   width: 16px;
   font-size: var(--fs-2xs);
   color: var(--faint);
 }
 .reading-activity-weekdays > span {
-  height: 13px;
-  line-height: 13px;
+  display: flex;
+  align-items: center;
+  line-height: 1;
 }
 .reading-activity-grid {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(var(--heat-weeks, 53), minmax(10px, 1fr));
   gap: 3px;
+  width: 100%;
 }
 .reading-activity-column {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: repeat(7, minmax(0, 1fr));
   gap: 3px;
 }
 .reading-activity .heat-cell {
-  width: 13px;
-  height: 13px;
-  min-width: 13px;
-  min-height: 13px;
-  max-height: 13px;
-  flex: 0 0 13px;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  min-width: 10px;
+  min-height: 10px;
   padding: 0;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 3px;
   background: var(--heat-empty);
   cursor: pointer;
 }
-.heat-cell.level-0 { background: var(--heat-empty); }
-.heat-cell.level-1 { background: var(--heat-1); }
-.heat-cell.level-2 { background: var(--heat-2); }
-.heat-cell.level-3 { background: var(--heat-3); }
-.heat-cell.level-4 { background: var(--heat-4); }
-.heat-cell.today {
+.reading-activity .heat-cell.level-0 {
+  background: var(--heat-empty);
+  border-color: var(--heat-border);
+}
+.reading-activity .heat-cell.level-1 { background: var(--heat-1); }
+.reading-activity .heat-cell.level-2 { background: var(--heat-2); }
+.reading-activity .heat-cell.level-3 { background: var(--heat-3); }
+.reading-activity .heat-cell.level-4 { background: var(--heat-4); }
+.reading-activity .heat-cell.today {
   box-shadow: 0 0 0 1px var(--accent);
 }
-.heat-cell.future {
+.reading-activity .heat-cell.future {
   background: repeating-linear-gradient(
     45deg,
     var(--heat-empty),
@@ -1187,22 +1210,31 @@ svg {
     transparent 6px
   );
 }
-.heat-cell.selected,
-.heat-cell:focus-visible {
+.reading-activity .heat-cell.selected,
+.reading-activity .heat-cell:focus-visible {
   outline: 2px solid var(--heat-ring);
   outline-offset: 1px;
 }
 .reading-activity-legend {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 4px;
   margin-top: var(--sp-2);
   font-size: var(--fs-2xs);
   color: var(--muted);
 }
 .reading-activity-legend small {
-  margin-left: 8px;
+  margin-right: 8px;
   color: var(--faint);
+}
+.reading-activity-legend .heat-cell {
+  width: 12px;
+  height: 12px;
+  min-width: 12px;
+  min-height: 12px;
+  flex: 0 0 12px;
+  aspect-ratio: auto;
 }
 .reading-activity-detail {
   margin-top: var(--sp-3);
@@ -1235,6 +1267,19 @@ svg {
   }
   .reading-activity-summary {
     gap: 4px 12px;
+  }
+  .reading-activity-legend {
+    justify-content: flex-start;
+  }
+  /* A year of squares cannot stay readable in a phone width: keep a 10px cell
+     and let the graph scroll inside its own row. */
+  .reading-activity-grid-wrap {
+    max-width: none;
+    margin: 0;
+  }
+  .reading-activity-grid,
+  .reading-activity-months {
+    min-width: calc(var(--heat-weeks, 53) * 13px);
   }
 }
 .pagination {
