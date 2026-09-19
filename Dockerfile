@@ -133,7 +133,7 @@ CMD ["python", "-m", "ipaper.document_worker"]
 
 FROM runtime-base AS runtime
 
-ARG APP_VERSION=1.9.4
+ARG APP_VERSION=1.10.0
 ARG VCS_REF=unknown
 ARG ARXIV_PROXY=
 ARG ARXIV_API_PROXY=

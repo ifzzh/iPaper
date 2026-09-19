@@ -22,7 +22,7 @@ A version number or screen on the development branch does not establish release 
 
 [Release 1.4.0](https://github.com/ifzzh/iPaper/releases/tag/v1.4.0) is deployed and verified. It adds full-document search, outlines and versioned bookmarks, cached paragraph translations in the original PDF, explicit selection translation, and figure/table/formula enlargement. No OCR or model request is triggered by searching or reading cached results. See [reading tools and limits](docs/development/reading-tools.md). That release uses Web 1.4.0 with Workers 1.2.0.
 
-Web 1.9.4 is published and deployed; the release record includes verified image digests and acceptance results.
+Web 1.10.0 introduces a dedicated research homepage with resume-reading cards, real reading statistics, a 7/30-day trend, the reading calendar, research topics and Daily access. The library keeps its full-height list. See the [release record](docs/releases/v1.10.0.md) for delivery status and component digests.
 
 1.9.4 fixes the same class of issue as the topic sidebar in the library list: its 5s poll flashed "正在加载…" over the rows. Background refreshes are now silent, the list polls every 30s only while the tab is visible with no request in flight, and job/Daily status polls follow the same rule. See [release status](docs/releases/v1.9.4.md).
 

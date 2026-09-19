@@ -1,7 +1,7 @@
 name: ipaper
 services:
   ipaper:
-    image: ifzzh520/ipaper:1.9.4@sha256:009aeb014553e7e6e0d69c9fca9a5e1555c3939d2b133ed09165b964e6752db5
+    image: ifzzh520/ipaper:1.10.0
     container_name: ipaper
     ports:
       - "127.0.0.1:7191:7191"
