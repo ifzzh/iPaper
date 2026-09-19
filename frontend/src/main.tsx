@@ -15,37 +15,29 @@ import {
   BookOpen,
   ChevronLeft,
   Menu,
+  House,
 } from "lucide-react";
 import { Auth } from "./Auth";
 import { Library, type Category } from "./Library";
 import { ImportDialog, Tasks, type LocalTask } from "./Transfers";
 import { api, Status, Markdown, useResource } from "./ui";
 import { papers, paperFrom, type Paper, type User, errorText } from "./api";
+import { workspaceRoute, type View } from "./routes";
 import "./style.css";
 const Settings = lazy(() =>
   import("./Settings").then((m) => ({ default: m.Settings })),
 );
 const Daily = lazy(() => import("./Daily").then((m) => ({ default: m.Daily })));
+const Home = lazy(() => import("./Home").then((m) => ({ default: m.Home })));
 const Reader = lazy(() =>
   import("./Understanding").then((m) => ({ default: m.PaperWorkspace })),
 );
-type View = "library" | "reader" | "daily" | "settings" | "tasks" | "analysis";
-const route = () => {
-  const p = new URLSearchParams(location.search);
-  return {
-    view: (["reader", "daily", "settings", "tasks", "analysis"].includes(
-      p.get("view") || "",
-    )
-      ? p.get("view")
-      : "library") as View,
-    paper: p.get("paper") || "",
-    translated: p.get("document") === "translated",
-  };
-};
+const route = () => workspaceRoute(location.search);
 function App() {
   const [user, setUser] = useState<User | null>(null),
     [checking, setChecking] = useState(true),
     [items, setItems] = useState<Paper[]>([]),
+    [itemsLoaded, setItemsLoaded] = useState(false),
     [loading, setLoading] = useState(false),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
@@ -99,13 +91,15 @@ function App() {
     section = "models",
   ) {
     const p = new URLSearchParams();
-    if (view !== "library") p.set("view", view);
+    if (view === "home") paper = "";
+    if (view !== "home") p.set("view", view);
     if (paper) p.set("paper", paper);
     if (view === "settings") p.set("section", section);
     if (view === "reader")
       p.set("document", translated ? "translated" : "original");
     if (view === "reader" && paper)
       updatePreferences({
+        activePaper: paper,
         tabDocuments: {
           ...preferences.current.tabDocuments,
           [paper]: translated ? "translated" : "original",
@@ -133,6 +127,7 @@ function App() {
     setUser(null);
     identity.current = null;
     setItems([]);
+    setItemsLoaded(false);
     setTabs([]);
     setTaskRefs([]);
     setStateReady(false);
@@ -212,7 +207,10 @@ function App() {
     setError("");
     papers(c.signal)
       .then((data) => {
-        if (seq === epoch.current) setItems(data);
+        if (seq === epoch.current) {
+          setItems(data);
+          setItemsLoaded(true);
+        }
       })
       .catch((e) => {
         if (!c.signal.aborted) setError(errorText(e));
@@ -264,7 +262,9 @@ function App() {
         tabs,
         activePaper: tabs.includes(locationState.paper)
           ? locationState.paper
-          : null,
+          : tabs.includes(preferences.current.activePaper)
+            ? preferences.current.activePaper
+            : null,
         theme,
         taskRefs,
         readerResults: Object.fromEntries(
@@ -382,6 +382,7 @@ function App() {
       </>
     );
   const nav = [
+    ["home", "首页", House],
     ["library", "文献库", LibraryIcon],
     ["daily", "Daily arXiv", Rss],
     ["tasks", "任务中心", ListTodo],
@@ -396,9 +397,9 @@ function App() {
         <div className="sidebar-brand">
           <button
             className="brand-mark"
-            aria-label="iPaper 文献库"
+            aria-label="iPaper 首页"
             onClick={() => {
-              navigate("library", "");
+              navigate("home", "");
               setSidebarOpen(false);
             }}
           >
@@ -458,12 +459,16 @@ function App() {
           </button>
           <button
             className="brand"
-            aria-label="iPaper 文献库"
-            onClick={() => navigate("library", "")}
+            aria-label="iPaper 首页"
+            onClick={() => navigate("home", "")}
           >
             iPaper
           </button>
-          <div className="workspace-tabs" role="tablist" aria-label="打开的论文">
+          <div
+            className="workspace-tabs"
+            role="tablist"
+            aria-label="打开的论文"
+          >
             {tabs.map((id) => (
               <div
                 className={
@@ -564,6 +569,27 @@ function App() {
         )}
         <div className="app-content">
           <Suspense fallback={<Status loading />}>
+            {locationState.view === "home" && (
+              <Home
+                user={user}
+                items={items}
+                tabs={tabs}
+                preferences={preferences.current}
+                loading={loading || (!itemsLoaded && !error)}
+                error={error}
+                onRead={read}
+                onRefresh={changed}
+                onLibrary={(next = "all") => {
+                  setFilter(next);
+                  updatePreferences({
+                    topicFilter: next.startsWith("topic:") ? next : "all",
+                  });
+                  navigate("library", "");
+                }}
+                onDaily={() => navigate("daily", "")}
+                onImport={() => setImporting(true)}
+              />
+            )}
             {locationState.view === "library" && (
               <Library
                 sidebarSlot={sidebarSlot}

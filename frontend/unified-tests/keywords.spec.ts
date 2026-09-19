@@ -17,7 +17,7 @@ test("local extraction, correction, filtering, merge undo and responsive library
   page.on("console", (m) => {
     if (/Content Security Policy|Refused to/.test(m.text())) csp.push(m.text());
   });
-  await page.goto("/");
+  await page.goto("/?view=library");
   await page.getByLabel("账号", { exact: true }).fill("reader_pdf");
   await page.getByLabel("密码", { exact: true }).fill("workbench-test-pass");
   await page.getByRole("button", { name: "登录", exact: true }).click();
@@ -126,7 +126,7 @@ test("local extraction, correction, filtering, merge undo and responsive library
 test("explicit simulated model enhancement is reused without a second request", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?view=library");
   await page.getByLabel("账号", { exact: true }).fill("reader_pdf");
   await page.getByLabel("密码", { exact: true }).fill("workbench-test-pass");
   await page.getByRole("button", { name: "登录", exact: true }).click();
@@ -157,7 +157,7 @@ test("explicit simulated model enhancement is reused without a second request", 
 test("server filters and fixed cross-page selection agree beyond one hundred papers", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?view=library");
   await page.getByLabel("账号", { exact: true }).fill("reader_one");
   await page.getByLabel("密码", { exact: true }).fill("workbench-test-pass");
   await page.getByRole("button", { name: "登录", exact: true }).click();

@@ -1,9 +1,10 @@
 import type React from "react";
 import { useMemo, useState } from "react";
 import { CalendarDays, ChevronRight } from "lucide-react";
-import { api, dateText, useResource, Status, APP_TIME_ZONE_LABEL } from "./ui";
+import { dateText, useResource, Status, APP_TIME_ZONE_LABEL } from "./ui";
+import { calendarWindow } from "./home-data";
 
-type ActivityDay = {
+export type ActivityDay = {
   date: string;
   minutes: number;
   papers: number;
@@ -13,7 +14,7 @@ type ActivityDay = {
   today: boolean;
 };
 
-type ActivityPayload = {
+export type ActivityPayload = {
   timezone: string;
   generatedAt: string;
   range: { start: string; end: string; weeks: number };
@@ -40,20 +41,40 @@ function label(day: ActivityDay) {
   return parts.join(" · ");
 }
 
-export function ReadingActivity({ compact = false }: { compact?: boolean }) {
+export function ReadingActivity({
+  compact = false,
+  source,
+  onRead,
+  availablePaperIds,
+}: {
+  compact?: boolean;
+  source?: {
+    data: ActivityPayload | null;
+    loading: boolean;
+    error: string;
+    refresh: () => void;
+  };
+  onRead?: (id: string) => void;
+  availablePaperIds?: string[];
+}) {
   // A full year is the default so the calendar reads like GitHub's graph and
   // fills the content column; 12 weeks stays one click away.
   const [weeks, setWeeks] = useState(53);
   const [selected, setSelected] = useState<string>("");
   const resource = useResource<ActivityPayload | null>(
-    `/api/settings/reading-activity?weeks=${weeks}`,
+    source ? null : `/api/settings/reading-activity?weeks=${weeks}`,
     null,
   );
   const detail = useResource<any>(
     selected ? `/api/settings/reading-activity/papers?date=${selected}` : null,
     null,
   );
-  const data = resource.data;
+  const data = source ? calendarWindow(source.data, weeks) : resource.data;
+  const state = source || resource;
+  const selectedDay = data?.days.find((day) => day.date === selected);
+  // A late response from the previously selected date must not be labelled
+  // with the new date while its request is still pending.
+  const selectedDetail = detail.data?.date === selected ? detail.data : null;
 
   const columns = useMemo(() => {
     const days = data?.days || [];
@@ -89,10 +110,16 @@ export function ReadingActivity({ compact = false }: { compact?: boolean }) {
             <CalendarDays size={16} /> 阅读活动
           </h3>
           <p className="muted">
-            仅统计活动、可见且正文已加载的阅读区；日期与时间为{APP_TIME_ZONE_LABEL}。
+            {source
+              ? "每一天的专注，都在这里留下印记。北京时间（UTC+8）。"
+              : `仅统计活动、可见且正文已加载的阅读区；日期与时间为${APP_TIME_ZONE_LABEL}。`}
           </p>
         </div>
-        <div className="reading-activity-range" role="group" aria-label="时间范围">
+        <div
+          className="reading-activity-range"
+          role="group"
+          aria-label="时间范围"
+        >
           <button
             className={weeks === 12 ? "active" : ""}
             aria-pressed={weeks === 12}
@@ -111,9 +138,9 @@ export function ReadingActivity({ compact = false }: { compact?: boolean }) {
       </header>
 
       <Status
-        error={resource.error}
-        loading={resource.loading && !data}
-        retry={resource.refresh}
+        error={state.error}
+        loading={state.loading && !data}
+        retry={state.refresh}
       />
 
       {summary && (
@@ -174,6 +201,7 @@ export function ReadingActivity({ compact = false }: { compact?: boolean }) {
                           .join(" ")}
                         aria-label={label(day)}
                         title={label(day)}
+                        disabled={day.future}
                         onClick={() => setSelected(day.date)}
                         onFocus={() => setSelected(day.date)}
                       />
@@ -190,7 +218,11 @@ export function ReadingActivity({ compact = false }: { compact?: boolean }) {
         <small>0 / &lt;15 / &lt;30 / &lt;60 / ≥60 分钟</small>
         <span>少</span>
         {[0, 1, 2, 3, 4].map((level) => (
-          <i key={level} className={`heat-cell level-${level}`} aria-hidden="true" />
+          <i
+            key={level}
+            className={`heat-cell level-${level}`}
+            aria-hidden="true"
+          />
         ))}
         <span>多</span>
       </div>
@@ -207,26 +239,38 @@ export function ReadingActivity({ compact = false }: { compact?: boolean }) {
               关闭
             </button>
           </header>
-          {detail.loading && !detail.data && <p className="muted">正在读取当天论文…</p>}
+          {detail.loading && !selectedDetail && (
+            <p className="muted">正在读取当天论文…</p>
+          )}
           {detail.error && <p role="alert">{detail.error}</p>}
-          {detail.data?.papers?.length ? (
+          {selectedDetail?.papers?.length ? (
             <ul>
-              {detail.data.papers.map((paper: any) => (
+              {selectedDetail.papers.map((paper: any) => (
                 <li key={paper.paper_id}>
-                  <a href={`/?paper=${encodeURIComponent(paper.paper_id)}`}>
-                    {paper.title || paper.arxiv_id || paper.paper_id}
-                    <ChevronRight size={13} />
-                  </a>
+                  {onRead && availablePaperIds?.includes(paper.paper_id) ? (
+                    <button
+                      className="home-text-link"
+                      onClick={() => onRead(paper.paper_id)}
+                    >
+                      {paper.title || paper.arxiv_id || paper.paper_id}
+                      <ChevronRight size={13} />
+                    </button>
+                  ) : (
+                    <a href={`/?paper=${encodeURIComponent(paper.paper_id)}`}>
+                      {paper.title || paper.arxiv_id || paper.paper_id}
+                      <ChevronRight size={13} />
+                    </a>
+                  )}
                 </li>
               ))}
             </ul>
-          ) : (
+          ) : selectedDetail ? (
             <p className="muted">
-              {detail.data && !detail.data.papers?.length
-                ? "这一天只有累计时长，没有逐篇记录。"
-                : "没有可回看的论文记录。"}
+              {selectedDay?.minutes
+                ? "这一天有累计时长，暂无可回看的逐篇记录。"
+                : "这一天还没有阅读记录。"}
             </p>
-          )}
+          ) : null}
         </div>
       )}
     </section>

@@ -35,7 +35,7 @@ test("library list does not flash its spinner on background refresh", async ({
       response.request().method() === "GET",
     { timeout: 20000 },
   );
-  await page.goto("/");
+  await page.goto("/?view=library");
   await firstList;
 
   await expect(page.locator(".paper-row").first()).toBeVisible({ timeout: 20000 });

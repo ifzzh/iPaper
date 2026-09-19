@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 
 async function login(page: Page) {
-  await page.goto("/");
+  await page.goto("/?view=library");
   await page.getByLabel("账号", { exact: true }).fill("reader_one");
   await page.getByLabel("密码", { exact: true }).fill("workbench-test-pass");
   await page.getByRole("button", { name: "登录", exact: true }).click();

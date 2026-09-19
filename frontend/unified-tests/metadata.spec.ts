@@ -2,7 +2,7 @@ import {test,expect} from '@playwright/test';
 
 test('metadata edit, protected clear, bibliography, batch and responsive details',async({page},testInfo)=>{
  const faults:string[]=[];page.on('pageerror',e=>faults.push(e.message));
- await page.goto('/');await page.getByLabel('账号',{exact:true}).fill('reader_pdf');await page.getByLabel('密码',{exact:true}).fill('workbench-test-pass');await page.getByRole('button',{name:'登录',exact:true}).click();
+ await page.goto('/?view=library');await page.getByLabel('账号',{exact:true}).fill('reader_pdf');await page.getByLabel('密码',{exact:true}).fill('workbench-test-pass');await page.getByRole('button',{name:'登录',exact:true}).click();
  await expect(page.locator('.paper-row').first()).toBeVisible();await page.locator('.paper-row').first().click();
  const id=new URL(page.url()).searchParams.get('paper')!;
  const original=await (await page.request.get(`/api/paper/${id}`)).json();
@@ -27,7 +27,7 @@ test('metadata edit, protected clear, bibliography, batch and responsive details
 });
 
 test('two tabs retain a conflicting manual draft and an explicit empty field',async({page,context})=>{
- await page.goto('/');await page.getByLabel('账号',{exact:true}).fill('reader_pdf');await page.getByLabel('密码',{exact:true}).fill('workbench-test-pass');await page.getByRole('button',{name:'登录',exact:true}).click();
+ await page.goto('/?view=library');await page.getByLabel('账号',{exact:true}).fill('reader_pdf');await page.getByLabel('密码',{exact:true}).fill('workbench-test-pass');await page.getByRole('button',{name:'登录',exact:true}).click();
  await page.locator('.paper-row').first().click();const target=page.url(),second=await context.newPage();await second.goto(target);
  for(const tab of [page,second])await tab.getByLabel('编辑元数据').click();
  await page.getByRole('dialog').getByRole('textbox',{name:'标题',exact:true}).fill('第一标签已保存的标题');

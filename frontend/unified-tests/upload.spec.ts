@@ -7,7 +7,7 @@ test("empty library uploads a synthetic PDF, reads it and retains Reading List",
   await page.request.post("/api/auth/login", {
     data: { username: "empty_reader", password: "workbench-test-pass" },
   });
-  await page.goto("/");
+  await page.goto("/?view=library");
   await expect(
     page.getByRole("heading", { name: "从第一篇论文开始" }),
   ).toBeVisible();

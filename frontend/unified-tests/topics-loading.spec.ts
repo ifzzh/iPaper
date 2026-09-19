@@ -41,7 +41,7 @@ test("topic sidebar clears its spinner and polls slowly", async ({ page }) => {
       response.request().method() === "GET",
     { timeout: 20000 },
   );
-  await page.goto("/");
+  await page.goto("/?view=library");
   await firstTopics;
 
   // Once the first response is in, the spinner must disappear and stay gone.

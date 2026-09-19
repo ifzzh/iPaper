@@ -170,20 +170,14 @@ test("desktop and mobile unified visual acceptance with bounded PDF rendering", 
   });
   expect(rows).toBeGreaterThanOrEqual(50);
   expect(density!.full).toBeGreaterThanOrEqual(4);
-  await page.goto("/");
+  await page.goto("/?view=library");
   await expect(page.locator(".paper-row").first()).toBeVisible();
   expect(await page.locator(".paper-details:visible").count()).toBe(0);
 
-  // Expanding is a persisted toggle and the calendar needs its data: retry the
-  // click a bounded number of times and wait for the grid, not the legend.
+  // Reading activity now lives on the independent home, not over the list.
   const openActivity = async () => {
-    await expect(page.locator(".library-activity-toggle")).toBeVisible({ timeout: 20000 });
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (await page.locator(".reading-activity-scroll").isVisible().catch(() => false)) return;
-      await page.locator(".library-activity-toggle").click();
-      if (await page.locator(".reading-activity-scroll").isVisible().catch(() => false)) return;
-      await page.waitForTimeout(600);
-    }
+    await page.goto("/");
+    await expect(page.locator(".home-page")).toBeVisible();
     await expect(page.locator(".reading-activity-scroll")).toBeVisible({ timeout: 20000 });
   };
 

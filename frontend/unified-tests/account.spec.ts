@@ -15,7 +15,7 @@ test('administrator invite, unified registration and own profile remain usable',
  await expect(fresh.getByText('账号已创建，请登录。')).toBeVisible();
  await fresh.getByLabel('密码',{exact:true}).fill('workbench-test-pass');
  await fresh.getByRole('button',{name:'登录',exact:true}).click();
- await expect(fresh.locator('.library-list-panel')).toBeVisible();
+ await expect(fresh.locator('.home-page')).toBeVisible();
  await fresh.goto('/?view=settings&section=account');
  await expect(fresh.getByRole('heading',{name:'个人资料',exact:true})).toBeVisible();
  expect((await fresh.request.get('/api/admin/users')).status()).toBe(403);

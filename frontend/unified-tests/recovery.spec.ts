@@ -37,7 +37,7 @@ test("position read failure never overwrites history, stale detail and expired i
       "阅读位置暂时无法加载，本次阅读不会覆盖已保存位置；请重新加载重试。",
     ),
   ).toHaveCount(0);
-  await page.goto("/");
+  await page.goto("/?view=library");
   let release: () => void = () => {};
   const gate = new Promise<void>((r) => (release = r));
   await page.route("**/api/paper/c-5", async (route) => {
