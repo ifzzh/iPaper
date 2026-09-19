@@ -424,7 +424,10 @@ export function StructuredSettings() {
     <section className="settings-card">
       <h3>结构化翻译</h3>
       <p>独立于 BabelDOC；MinerU 沿用下方已有云解析配置。</p>
-      <Status error={error || resource.error} loading={resource.loading} />
+      <Status
+        error={error || resource.error}
+        loading={resource.loading && !resource.loaded}
+      />
       {resource.data && (
         <>
           <Field label="模型名称">
@@ -511,12 +514,15 @@ export function ProcessingTaskDetails({
     }
   }, [task.data?.job?.status]);
   useEffect(() => {
+    // A running job needs a close watch; a page left in the background does not.
     const t = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (task.loading) return;
       task.refresh();
       events.refresh();
     }, 3000);
     return () => clearInterval(t);
-  }, [id]);
+  }, [id, task.loading]);
   async function action(name: string) {
     try {
       await api(`/api/processing/jobs/${id}/${name}`, "POST", {});

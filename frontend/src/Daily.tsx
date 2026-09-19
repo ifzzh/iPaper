@@ -73,9 +73,13 @@ export function Daily({
     return () => c.abort();
   }, [papers.data]);
   useEffect(() => {
-    const t = setInterval(() => scheduler.refresh(), 15000);
+    const t = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (scheduler.loading) return;
+      scheduler.refresh();
+    }, 15000);
     return () => clearInterval(t);
-  }, []);
+  }, [scheduler.loading]);
   async function add(p: any, read: boolean) {
     setBusy(p.arxiv_id);
     setError("");
@@ -222,7 +226,7 @@ export function Daily({
       </div>
       <Status
         error={error || dates.error || papers.error}
-        loading={papers.loading}
+        loading={papers.loading && !papers.loaded}
       />
       <div className="daily-grid">
         {visible.map((p: any) => (

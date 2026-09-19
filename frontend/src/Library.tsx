@@ -246,12 +246,16 @@ export function Library({
     catalog.refresh();
   }, [items]);
   useEffect(() => {
+    // Keep the list in step with background work, but slowly and without piling
+    // requests up. The 5s version flashed the blocking "正在加载…" over the rows
+    // (and the tag catalog changes are handled by explicit actions instead).
     const timer = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (list.loading || busy) return;
       list.refresh();
-      catalog.refresh();
-    }, 5000);
+    }, 30000);
     return () => clearInterval(timer);
-  }, []);
+  }, [list.loading, busy]);
   useEffect(() => {
     if (total > 0 && page > Math.ceil(total / 50))
       setPage(Math.ceil(total / 50));
@@ -420,7 +424,7 @@ export function Library({
         )}
         <Status
           error={error || failure || list.error}
-          loading={loading || list.loading}
+          loading={loading || (list.loading && !list.loaded)}
           retry={onChanged}
         />
         {checked.length > 0 && (

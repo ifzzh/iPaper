@@ -7,7 +7,7 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   ...base,
   testDir: "./unified-tests",
-  testMatch: ["topics-loading.spec.ts"],
+  testMatch: ["topics-loading.spec.ts", "list-loading.spec.ts"],
   use: {
     ...base.use,
     launchOptions: {

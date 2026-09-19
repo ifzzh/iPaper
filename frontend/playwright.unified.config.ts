@@ -5,6 +5,7 @@ export default defineConfig({
   testDir: "./unified-tests",
   testIgnore: [
     "topics-loading.spec.ts",
+    "list-loading.spec.ts",
     "structured.spec.ts",
     "understanding.spec.ts",
     "reading-tools.spec.ts",
