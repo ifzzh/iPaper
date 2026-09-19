@@ -2,7 +2,7 @@
 #    uv export --frozen --no-dev --no-emit-project --no-hashes --extra web --extra document --extra test --output-file docker/requirements-test.txt
 annotated-types==0.7.0
     # via pydantic
-anyio==4.12.1
+anyio==4.14.2
     # via
     #   httpx
     #   openai

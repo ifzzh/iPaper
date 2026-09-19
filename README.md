@@ -22,7 +22,9 @@ A version number or screen on the development branch does not establish release 
 
 [Release 1.4.0](https://github.com/ifzzh/iPaper/releases/tag/v1.4.0) is deployed and verified. It adds full-document search, outlines and versioned bookmarks, cached paragraph translations in the original PDF, explicit selection translation, and figure/table/formula enlargement. No OCR or model request is triggered by searching or reading cached results. See [reading tools and limits](docs/development/reading-tools.md). That release uses Web 1.4.0 with Workers 1.2.0.
 
-Web 1.9.2 is published and deployed; the release record includes verified image digests and acceptance results.
+Web 1.9.3 is published and deployed; the release record includes verified image digests and acceptance results.
+
+1.9.3 is a security patch: the Web dependency set moves anyio from 4.12.1 to 4.14.2, fixing the newly disclosed CVE-2026-63374 and CVE-2026-64847 that made the dependency gate block CI. It also carries the 1.9.2 topic-sidebar loading fix. See [release status](docs/releases/v1.9.3.md).
 
 1.9.2 fixes the topic sidebar that kept showing "正在加载…": background refreshes no longer render the blocking indicator, only the newest response may update resource state, polling is 30s and runs only while the tab is visible with no request in flight, and a hung request now times out instead of pinning the UI. See [release status](docs/releases/v1.9.2.md).
 
