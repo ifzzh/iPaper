@@ -1,10 +1,9 @@
 {
-  "release": "1.11.0",
+  "release": "1.12.0",
   "web": {
-    "tag": "1.11.0",
+    "tag": "1.12.0",
     "publish": true,
-    "repository": "ifzzh520/ipaper",
-    "digest": "sha256:4de7fc2c6fe4341459d31a3ba0c5b917d46cf0f78ea8b9347206e77a5b0db366"
+    "repository": "ifzzh520/ipaper"
   },
   "translation_worker": {
     "tag": "1.2.0",
