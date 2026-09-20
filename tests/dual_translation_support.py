@@ -1,5 +1,6 @@
 """Synthetic-only adapters for browser acceptance. Never imported by runtime."""
 import json
+import os
 import uuid
 import zipfile
 from pathlib import Path
@@ -60,4 +61,25 @@ def install(application, directory, users, origin, patch):
             service.credentials.set('mineru','synthetic-cloud-only')
             current.profiles.save('fixture',origin+'/v1',key='synthetic-model-only')
         run_as_identity(Identity(user['id'],user['username'],user['role']),seed)
+    if os.getenv("IPAPER_BROWSER_STOPPED_JOB") == "1":
+        # Seed a stopped whole-paper translation *before* the worker starts, so
+        # the budget top-up UI has a deterministic resumable job to work with.
+        user = users[-1]
+        def seed_stopped():
+            pipeline = service.pipeline(user["id"])
+            jobs = pipeline.jobs
+            job, _ = jobs.create(
+                "c-4", "parse_translate",
+                {"kind": "parse_translate", "preflightId": "synthetic-stopped",
+                 "parseId": None, "config": {"targetLanguage": "zh-CN"}},
+                budget={"requests": 2, "inputTokens": 1000, "outputTokens": 1000,
+                        "seconds": 3600},
+            )
+            jobs.claim(job["id"])
+            attempt = jobs.reserve_attempt(job["id"], "model", "synthetic-unit",
+                                           input_tokens=100, output_tokens=50)
+            jobs.finish_attempt(job["id"], attempt, "completed",
+                                {"inputTokens": 80, "outputTokens": 40})
+            jobs.finish(job["id"], "partial", error="processing_budget_exceeded")
+        run_as_identity(Identity(user["id"], user["username"], user["role"]), seed_stopped)
     service.start()

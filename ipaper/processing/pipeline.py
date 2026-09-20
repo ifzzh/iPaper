@@ -208,8 +208,22 @@ class ProcessingPipeline:
                     _,input_bound,output_bound=request_payload(units[offset:offset+8],target)
                     requests+=1;inputs+=input_bound;outputs+=output_bound
             after=blocks[-1]["order"]
-        return {"selectedBlocks":selected,"cachedBlocks":cached,"requests":requests,"inputTokens":inputs,"outputTokens":outputs,
-                "estimation":"保守预留量；实际 token 以供应商返回的用量为准"}
+        # `requests` is the number of base model calls. Each call may consume one
+        # extra request when the provider answers 429 and the single allowed
+        # retry is used, so the admission envelope is base + allowance.
+        retry_allowance = requests
+        return {
+            "selectedBlocks": selected,
+            "cachedBlocks": cached,
+            "requests": requests,
+            "retryAllowance": retry_allowance,
+            "requestsWithRetryAllowance": requests + retry_allowance,
+            "inputTokens": inputs,
+            "outputTokens": outputs,
+            "worstCaseInputTokens": inputs * 2,
+            "worstCaseOutputTokens": outputs * 2,
+            "estimation": "保守预留量：按字节估算的输入预留 + 每请求生成上限累计，不是计费 token，也不保证额度内必然完成；实际用量以供应商返回为准。",
+        }
 
     def create(self, paper_id, data, *, preview=False):
         kind = data.get("kind", "parse_translate")
@@ -264,18 +278,23 @@ class ProcessingPipeline:
         # revision, so repeated clicks return the same job; a subsequent user
         # action after success may legitimately generate another revision.
         estimate = None
-        budget = self.jobs.budget(data.get("budget"))
+        budget = self.jobs.budget(data.get("budget"), kind=kind)
         if parse_id and kind != "parse":
             estimate=self.estimate(parse_id,result_id=result_id,pages=pages,block_ids=blocks,target=target,force=kind=="retranslate")
-        exceeds = bool(estimate and any(estimate[key] > budget[key] for key in ("requests", "inputTokens", "outputTokens")))
+        overage = self.jobs.check_scope(estimate or {}, budget) if estimate else {}
         if preview:
-            return {"estimate": estimate, "budget": budget, "exceedsBudget": exceeds,
+            return {"estimate": estimate, "budget": budget, "limits": self.jobs.budget_ceiling(kind),
+                    "exceedsBudget": bool(overage), "overage": overage, "kind": kind,
                     "parseRequired": not bool(parse_id), "pageCount": document["page_count"],
                     "selectedPages": len(set(pages)) if pages else document["page_count"],
                     "translationResultId": result_id, "model": profile["model"],
                     "targetLanguage": target}
-        if exceeds:
-            raise ProcessingError("processing_scope_exceeds_budget", 409)
+        if overage:
+            raise ProcessingError(
+                "processing_scope_exceeds_budget", 409,
+                details={"overage": overage, "budget": budget, "estimate": estimate,
+                         "limits": self.jobs.budget_ceiling(kind)},
+            )
         previous_revision = self.store.translation(result_id, blocks[0]) if kind == "retranslate" and result_id else None
         request = {"preflightId": preflight_id, "parseId": parse_id, "pages": sorted(set(pages)) if pages else None,
                    "blockIds": sorted(set(blocks)) if blocks else None, "config": config,
@@ -314,6 +333,69 @@ class ProcessingPipeline:
             self.jobs.finish(job_id, status, error=exc.code)
         except Exception:
             self.jobs.finish(job_id, "failed", error="processing_failed")
+
+    RESUMABLE_STATUSES = {"partial", "interrupted", "failed", "cancelled"}
+
+    def resume_plan(self, job_id):
+        """What continuing this job still needs — read-only, no model or worker call.
+
+        The plan uses the already reserved usage plus an estimate of the
+        unfinished scope with existing per-unit checkpoints applied, so a
+        continued job does not repeat completed work. The time dimension is
+        reported as the already-used floor: remaining duration cannot be
+        estimated honestly in advance.
+        """
+        from .jobs import TRANSLATION_KINDS
+
+        job = self.jobs.get(job_id)
+        if job["kind"] not in TRANSLATION_KINDS:
+            raise ProcessingError("unsupported_job_kind_for_budget", 400)
+        request = json.loads(job["request_json"])
+        checkpoint = json.loads(job["checkpoint_json"])
+        usage = json.loads(job["usage_json"])
+        budget = json.loads(job["budget_json"])
+        parse_id = checkpoint.get("parseId") or request.get("parseId")
+        scratch = self.store.artifact_directory(job_id)
+        estimate = None
+        if parse_id:
+            estimate = self.estimate(
+                parse_id,
+                result_id=job["result_id"],
+                pages=request.get("pages"),
+                block_ids=request.get("blockIds"),
+                target=request.get("config", {}).get("targetLanguage", "zh-CN"),
+                force=False,
+                checkpoint_root=scratch,
+                request=request,
+            )
+        required = {}
+        for key in ("requests", "inputTokens", "outputTokens"):
+            required[key] = int(usage.get(key) or 0) + int((estimate or {}).get(key) or 0)
+        overage = self.jobs.check_scope(estimate or {}, budget, usage) if estimate else {}
+        return {
+            "jobId": job_id,
+            "kind": job["kind"],
+            "status": job["status"],
+            "resumable": job["status"] in self.RESUMABLE_STATUSES,
+            "parseRequired": not bool(parse_id),
+            "estimate": estimate,
+            "usage": usage,
+            "budget": budget,
+            "required": {**required, "seconds": int(usage.get("seconds") or 0)},
+            "limits": self.jobs.budget_ceiling(job["kind"]),
+            "overage": overage,
+            "sufficient": not overage,
+            "secondsBasis": "已用累计时间；剩余时长无法预先估算，续跑按同一上限继续计时。",
+        }
+
+    def resume(self, job_id, budget=None):
+        """Adjust a stopped translation's envelope and continue it."""
+        from .jobs import TRANSLATION_KINDS
+
+        job = self.jobs.get(job_id)
+        if job["kind"] not in TRANSLATION_KINDS:
+            raise ProcessingError("unsupported_job_kind_for_budget", 400)
+        self.jobs.resume(job_id, budget)
 
     def _check_source(self, paper_id, sha):
         if file_digest(self.paper_file(paper_id)) != sha:
@@ -464,8 +546,12 @@ class ProcessingPipeline:
         # For a new parse, this is the first reliable estimate. Stop before any
         # model call if its whole selected scope cannot fit the approved budget.
         usage,budget=json.loads(job["usage_json"]),json.loads(job["budget_json"])
-        if any(estimate[key]+usage[key]>budget[key] for key in ("requests","inputTokens","outputTokens")):
-            raise ProcessingError("processing_scope_exceeds_budget",409)
+        overage = self.jobs.check_scope(estimate, budget, usage)
+        if overage:
+            raise ProcessingError(
+                "processing_scope_exceeds_budget", 409,
+                details={"overage": overage, "usage": usage, "budget": budget},
+            )
         failures, completed, after = 0, 0, -1
         while True:
             blocks = self.store.blocks(result_id, after=after, limit=50)

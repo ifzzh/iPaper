@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 
 
 class ProcessingError(ValueError):
-    def __init__(self, code: str, status: int = 400):
+    def __init__(self, code: str, status: int = 400, details: dict | None = None):
         super().__init__(code)
-        self.code, self.status = code, status
+        self.code, self.status, self.details = code, status, dict(details or {})
 
 
 def now() -> str:

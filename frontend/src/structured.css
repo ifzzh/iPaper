@@ -302,3 +302,46 @@
 
 .formula-inline { display: inline; white-space: normal; }
 .formula-inline math { font-size: 1.05em; }
+
+.processing-budget {
+  margin: 6px 0 2px;
+}
+.processing-budget-editor {
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--subtle);
+}
+.processing-budget-editor summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.processing-budget-editor .form-grid {
+  margin-top: 10px;
+}
+.processing-resume-budget {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.processing-resume-budget .form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+.processing-resume-budget .button-row {
+  display: flex;
+  gap: 8px;
+}
+@media (max-width: 640px) {
+  .processing-resume-budget .form-grid {
+    grid-template-columns: 1fr;
+  }
+}

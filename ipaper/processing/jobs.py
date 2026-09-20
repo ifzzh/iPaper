@@ -4,7 +4,72 @@ import json
 from datetime import datetime, timezone
 from .common import ProcessingError, encoded, fingerprint, identifier, now
 
+import os
+
+# Kinds whose model work is a whole-paper structured translation. Only these
+# receive the larger envelope: BabelDOC, selection translation, overview,
+# interpretation and the plain MinerU parse keep their previous limits.
+TRANSLATION_KINDS = frozenset({"translate", "parse_translate", "retranslate"})
+BUDGET_KEYS = ("requests", "inputTokens", "outputTokens", "seconds")
+BUDGET_LABELS = {"requests": "模型请求", "inputTokens": "输入 token 预留", "outputTokens": "输出 token 预留", "seconds": "累计执行时间（秒）"}
+
 DEFAULT_BUDGET = {"requests": 200, "inputTokens": 500_000, "outputTokens": 250_000, "seconds": 7200}
+# A full paper no longer has to fit a small fixed envelope: the default covers
+# the reported 15-page / 271-block scope (245 base requests) even if every base
+# request used its one allowed 429 retry.
+DEFAULT_TRANSLATION_BUDGET = {
+    "requests": 500,
+    "inputTokens": 1_000_000,
+    "outputTokens": 500_000,
+    "seconds": 14_400,
+}
+_DEPLOY_MAX_TRANSLATION_BUDGET = {
+    "requests": 2_000,
+    "inputTokens": 5_000_000,
+    "outputTokens": 2_000_000,
+    "seconds": 43_200,
+}
+_MAX_ENV = {
+    "requests": "IPAPER_TRANSLATION_MAX_REQUESTS",
+    "inputTokens": "IPAPER_TRANSLATION_MAX_INPUT_TOKENS",
+    "outputTokens": "IPAPER_TRANSLATION_MAX_OUTPUT_TOKENS",
+    "seconds": "IPAPER_TRANSLATION_MAX_SECONDS",
+}
+
+
+def _deploy_max_budget() -> dict:
+    """Deploy-wide ceiling for structured translation, overridable per component.
+
+    An unreadable override fails loudly at import: a silently clamped or ignored
+    limit would be worse than refusing to start.
+    """
+    ceiling = dict(_DEPLOY_MAX_TRANSLATION_BUDGET)
+    for key, variable in _MAX_ENV.items():
+        raw = os.environ.get(variable)
+        if raw is None or raw == "":
+            continue
+        if not raw.strip().isdigit() or int(raw) < 1:
+            raise RuntimeError(
+                f"{variable} must be a positive integer, got {raw!r}"
+            )
+        ceiling[key] = int(raw)
+    return ceiling
+
+
+MAX_TRANSLATION_BUDGET = _deploy_max_budget()
+
+
+def default_budget(kind: str | None = None) -> dict:
+    return dict(DEFAULT_TRANSLATION_BUDGET if kind in TRANSLATION_KINDS else DEFAULT_BUDGET)
+
+
+def budget_ceiling(kind: str | None = None) -> dict:
+    """The largest envelope this deployment accepts for the kind.
+
+    Translation kinds get the deploy ceiling; every other kind keeps the old
+    fixed values so this change cannot silently widen them.
+    """
+    return dict(MAX_TRANSLATION_BUDGET if kind in TRANSLATION_KINDS else DEFAULT_BUDGET)
 TERMINAL = {"completed", "partial", "failed", "cancelled", "interrupted"}
 ACTIVE = {"queued", "running", "cancelling"}
 
@@ -15,21 +80,59 @@ class ProcessingJobs:
         self.result_quota, self.owner_quota = result_quota, owner_quota
 
     @staticmethod
-    def budget(value=None):
-        result = dict(DEFAULT_BUDGET)
+    def budget(value=None, kind=None):
+        """The effective budget for a job kind.
+
+        Defaults come from the kind, and an explicit value may only narrow or
+        widen within that kind's deploy ceiling. Every number must be a positive
+        integer; anything else is rejected instead of being coerced.
+        """
+        result = default_budget(kind)
+        ceiling = budget_ceiling(kind)
         if value is not None:
             if not isinstance(value, dict) or set(value) - set(result):
                 raise ProcessingError("invalid_budget")
             for key, number in value.items():
-                if type(number) is not int or not 1 <= number <= DEFAULT_BUDGET[key]:
-                    raise ProcessingError("invalid_budget")
+                if type(number) is not int or not 1 <= number <= ceiling[key]:
+                    raise ProcessingError(
+                        "invalid_budget",
+                        details={
+                            "dimension": key,
+                            "dimensionLabel": BUDGET_LABELS.get(key, key),
+                            "limit": ceiling[key],
+                            "allowedCeiling": ceiling,
+                        },
+                    )
                 result[key] = number
         return result
+
+    @staticmethod
+    def budget_ceiling(kind=None):
+        return budget_ceiling(kind)
+
+    @staticmethod
+    def check_scope(estimate, budget, usage=None):
+        """Which dimensions a scope overruns, with required and available values."""
+        usage = usage or {}
+        overage = {}
+        for key in ("requests", "inputTokens", "outputTokens"):
+            required = int(estimate.get(key) or 0) + int(usage.get(key) or 0)
+            limit = int(budget.get(key) or 0)
+            if required > limit:
+                overage[key] = {
+                    "dimension": key,
+                    "dimensionLabel": BUDGET_LABELS.get(key, key),
+                    "required": required,
+                    "remaining": max(0, limit - int(usage.get(key) or 0)),
+                    "limit": limit,
+                    "alreadyUsed": int(usage.get(key) or 0),
+                }
+        return overage
 
     def create(self, paper_id, kind, request, *, document_id=None, result_id=None, budget=None, reservation=None):
         if kind not in {"parse", "translate", "parse_translate", "retranslate", "overview", "interpretation", "analysis_export", "selection_translate"}:
             raise ProcessingError("invalid_processing_kind")
-        budget = self.budget(budget)
+        budget = self.budget(budget, kind=kind)
         reservation = self.result_quota if reservation is None else reservation
         if type(reservation) is not int or not 0 < reservation <= self.result_quota:
             raise ProcessingError("invalid_quota_reservation")
@@ -200,7 +303,13 @@ class ProcessingJobs:
             db.execute("UPDATE processing_jobs SET cancel_requested=1,status=?,reserved_bytes=?,updated_at=? WHERE id=?", (status, job["reserved_bytes"] if status == "cancelling" else self._checkpoint_bytes(job_id), now(), job_id))
             self._event(db, job_id, status, {"supplierCancellationConfirmed": False})
 
-    def resume(self, job_id):
+    def resume(self, job_id, budget=None):
+        """Continue a stopped job, optionally raising its whole-task envelope.
+
+        The adjusted budget is the task's cumulative total: already reserved
+        requests/tokens/seconds are never reset, and it may not be lower than
+        what the task has already used.
+        """
         with self.store.connection(write=True) as db:
             job = self.store._owned(db, "processing_jobs", job_id)
             if job["kind"] == "selection_translate":
@@ -228,8 +337,69 @@ class ProcessingJobs:
             reserved = db.execute("SELECT coalesce(sum(reserved_bytes),0) FROM processing_jobs WHERE owner_id=? AND id!=?", (self.store.owner,job_id)).fetchone()[0]
             if occupied + reserved + self.result_quota > self.owner_quota:
                 raise ProcessingError("owner_quota_exceeded", 413)
-            db.execute("UPDATE processing_jobs SET status='queued',cancel_requested=0,error=NULL,reserved_bytes=?,updated_at=? WHERE id=?", (self.result_quota, now(), job_id))
+            previous = json.loads(job["budget_json"])
+            usage = json.loads(job["usage_json"])
+            adjusted = previous
+            if budget is not None:
+                if not isinstance(budget, dict) or not budget:
+                    raise ProcessingError("invalid_budget")
+                merged = {**previous, **budget}
+                adjusted = self.budget(merged, kind=job["kind"])
+                below = {
+                    key: {"dimension": key, "dimensionLabel": BUDGET_LABELS.get(key, key),
+                          "used": int(usage.get(key) or 0), "requested": adjusted[key]}
+                    for key in BUDGET_KEYS
+                    if adjusted[key] < int(usage.get(key) or 0)
+                }
+                if below:
+                    raise ProcessingError(
+                        "budget_below_usage",
+                        details={"overage": below, "usage": usage, "budget": adjusted},
+                    )
+            db.execute("UPDATE processing_jobs SET status='queued',cancel_requested=0,error=NULL,reserved_bytes=?,budget_json=?,updated_at=? WHERE id=?",
+                       (self.result_quota, encoded(adjusted), now(), job_id))
             self._event(db, job_id, "resume_requested", {"unknownModelRequestsMayHaveBeenCharged": True})
+            if adjusted != previous:
+                self._event(db, job_id, "budget_adjusted", {"before": previous, "after": adjusted})
+
+    def actual_usage(self, job_id):
+        """Supplier-reported usage, summed from finished attempts.
+
+        Missing reports are counted, never turned into zeros: callers must show
+        this as partial. The reserved usage in ``usage_json`` is a conservative
+        pre-charge and is reported separately.
+        """
+        self.get(job_id)  # owner-scoped existence check
+        with self.store.connection() as db:
+            rows = db.execute(
+                "SELECT status,response_json FROM processing_attempts WHERE job_id=? AND kind='model'",
+                (job_id,),
+            ).fetchall()
+        input_tokens = output_tokens = 0
+        reported = missing = 0
+        for row in rows:
+            try:
+                response = json.loads(row["response_json"] or "{}")
+            except ValueError:
+                response = {}
+            has_input = type(response.get("inputTokens")) is int
+            has_output = type(response.get("outputTokens")) is int
+            if has_input:
+                input_tokens += int(response["inputTokens"])
+            if has_output:
+                output_tokens += int(response["outputTokens"])
+            if has_input or has_output:
+                reported += 1
+            else:
+                missing += 1
+        return {
+            "requests": len(rows),
+            "inputTokens": input_tokens,
+            "outputTokens": output_tokens,
+            "reportedAttempts": reported,
+            "missingAttempts": missing,
+            "complete": bool(rows) and missing == 0,
+        }
 
     def recover(self):
         # Called once at Web startup, before scheduling. No network calls.

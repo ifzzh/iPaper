@@ -29,7 +29,9 @@ def register_processing_routes(app, service):
 
     @blueprint.errorhandler(ProcessingError)
     def known(error):
-        return jsonify(error=error.code), error.status
+        payload = dict(error.details or {})
+        payload.pop("error", None)
+        return jsonify(error=error.code, **payload), error.status
 
     @blueprint.errorhandler(OutboundPolicyError)
     def outbound(error):
@@ -83,7 +85,11 @@ def register_processing_routes(app, service):
                 "status": job["status"], "stage": job["stage"], "completed": job["completed"],
                 "total": job["total"], "error": job["error"], "createdAt": job["created_at"],
                 "updatedAt": job["updated_at"], "budget": json.loads(job["budget_json"]),
-                "usage": json.loads(job["usage_json"]), "supplierCancellationConfirmed": False,"estimate":checkpoint.get("estimate"),"cloudTasks":cloud_tasks}
+                "usage": json.loads(job["usage_json"]),
+                # Reserved usage above is a conservative pre-charge; this is what
+                # the supplier actually reported, and it may be incomplete.
+                "actualUsage": service.pipeline().jobs.actual_usage(job["id"]),
+                "supplierCancellationConfirmed": False,"estimate":checkpoint.get("estimate"),"cloudTasks":cloud_tasks}
 
     @blueprint.get("/api/paper/<paper_id>/results")
     def results(paper_id):
@@ -243,11 +249,28 @@ def register_processing_routes(app, service):
 
     @blueprint.post("/api/processing/jobs/<job_id>/resume")
     def resume(job_id):
-        body(set())
+        """Continue a stopped translation, optionally raising its whole-task budget.
+
+        Without a body the job resumes under its existing envelope. With
+        ``budget`` the numbers are validated against the deploy ceiling and must
+        not be below what the task already reserved.
+        """
+        data = body({"budget"})
         pipeline = service.pipeline()
-        pipeline.jobs.resume(job_id)
+        if data.get("budget") is not None:
+            # A budget adjustment is only defined for whole-paper translation.
+            pipeline.resume(job_id, data.get("budget"))
+        else:
+            # Without an adjustment every resumable kind keeps its old path.
+            pipeline.jobs.resume(job_id)
         service.wake.set()
         return jsonify(job=public_job(pipeline.jobs.get(job_id)))
+
+    @blueprint.post("/api/processing/jobs/<job_id>/resume-plan")
+    def resume_plan(job_id):
+        """Read-only: what a continued job still needs and which limits apply."""
+        body(set())
+        return jsonify(plan=service.pipeline().resume_plan(job_id))
 
     @blueprint.route("/api/settings/structured-translation", methods=["GET", "PUT"])
     def settings():

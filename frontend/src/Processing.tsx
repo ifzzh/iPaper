@@ -21,6 +21,19 @@ export type ProcessingResult = {
   createdAt: string;
   provenance?: string | null;
 };
+// Budget wording shared with the backend contract (dimension keys are stable).
+const budgetLabels: Record<string, string> = {
+  requests: "模型请求",
+  inputTokens: "输入 token 预留",
+  outputTokens: "输出 token 预留",
+  seconds: "累计执行时间",
+};
+
+function formatHours(seconds: number): string {
+  const hours = seconds / 3600;
+  return Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
+}
+
 export const languageLabels: Record<string, string> = {
   "zh-CN": "简体中文",
   "zh-TW": "繁體中文",
@@ -111,8 +124,48 @@ export function TranslationDialog({
     [job, setJob] = useState<any>(null),
     [scope, setScope] = useState<any>(null),
     [estimating, setEstimating] = useState(false),
-    [scopeError, setScopeError] = useState("");
+    [scopeError, setScopeError] = useState(""),
+    [budgetDraft, setBudgetDraft] = useState<any>(null),
+    [budgetOpen, setBudgetOpen] = useState(false);
   const abort = useRef<AbortController | null>(null);
+  // Defaults and ceilings come from the API for this job kind, so the page
+  // never keeps its own copy of the numbers.
+  const budgetLimits = scope?.limits || preview?.limits || null;
+  // Only the kind-aware estimate response carries the envelope that will be
+  // used; the generic preflight budget is not shown as if it were this task's.
+  const effectiveBudget =
+    budgetDraft || (scope?.budget ? { ...scope.budget } : null);
+  function budgetValue(key: string): number | "" {
+    const value = effectiveBudget?.[key];
+    return typeof value === "number" ? value : "";
+  }
+  function changeBudget(key: string, raw: string) {
+    const base = { ...(effectiveBudget || {}) };
+    const parsed = raw.trim() === "" ? undefined : Number(raw);
+    if (parsed === undefined || !Number.isFinite(parsed)) delete base[key];
+    else base[key] = Math.floor(parsed);
+    setBudgetDraft(base);
+  }
+  function budgetProblem(): string {
+    if (!effectiveBudget) return "";
+    for (const key of ["requests", "inputTokens", "outputTokens", "seconds"] as const) {
+      const value = effectiveBudget[key];
+      if (value === undefined) return `请输入${budgetLabels[key]}。`;
+      if (!Number.isInteger(value) || value < 1)
+        return `${budgetLabels[key]}必须是正整数。`;
+      if (budgetLimits && value > budgetLimits[key])
+        return `${budgetLabels[key]}超过本次部署上限 ${budgetLimits[key].toLocaleString()}。`;
+    }
+    return "";
+  }
+  function applyRequiredBudget() {
+    if (!scope?.overage) return;
+    const next = { ...(effectiveBudget || scope.budget) };
+    for (const detail of Object.values<any>(scope.overage))
+      next[detail.dimension] = detail.required;
+    setBudgetDraft(next);
+    setBudgetOpen(true);
+  }
   useEffect(() => () => abort.current?.abort(), []);
   useEffect(() => {
     if (kind === "babeldoc" || preview) return;
@@ -151,8 +204,24 @@ export function TranslationDialog({
       targetLanguage: target,
       sourceLanguage,
       pages: selectedPages(range, preview.pageCount),
+      // Only an explicit user adjustment is sent: the kind's default comes from
+      // the server, so switching job kinds can never carry a stale envelope.
+      ...(budgetDraft && !budgetProblem()
+        ? {
+            budget: {
+              requests: effectiveBudget.requests,
+              inputTokens: effectiveBudget.inputTokens,
+              outputTokens: effectiveBudget.outputTokens,
+              seconds: effectiveBudget.seconds,
+            },
+          }
+        : {}),
     };
   }
+  useEffect(() => {
+    setBudgetDraft(null);
+    setBudgetOpen(false);
+  }, [kind]);
   useEffect(() => {
     if (kind === "babeldoc" || !preview || job) return;
     const controller = new AbortController();
@@ -198,6 +267,7 @@ export function TranslationDialog({
     blockId,
     sourceLanguage,
     job,
+    budgetDraft,
   ]);
   async function submit() {
     if (busy) return;
@@ -323,27 +393,125 @@ export function TranslationDialog({
                       </Field>
                     )}
                   </div>
-                  <p className="muted">
-                    本次上限：{preview.budget.requests} 次模型请求、
-                    {preview.budget.inputTokens / 10000} 万输入 token、
-                    {preview.budget.outputTokens / 10000} 万输出 token、2
-                    小时。每次请求最长 120 秒；结果不确定时不会自动重发。
-                  </p>
+                  <div className="processing-budget">
+                    <p className="muted">
+                      {effectiveBudget ? (
+                        <>
+                          本次额度：{effectiveBudget.requests} 次模型请求、
+                          {effectiveBudget.inputTokens.toLocaleString()} 输入预留、
+                          {effectiveBudget.outputTokens.toLocaleString()} 输出预留、
+                          {formatHours(effectiveBudget.seconds)} 小时
+                          {budgetLimits
+                            ? `（部署上限 ${budgetLimits.requests} 次 / ${formatHours(budgetLimits.seconds)} 小时）`
+                            : ""}
+                          。任务完成即停止，不会为了用满额度发请求；每次请求最长
+                          120 秒，结果不确定时不会自动重发。
+                        </>
+                      ) : (
+                        "正在读取本次可用额度…"
+                      )}
+                    </p>
+                    {scope && (
+                      <details
+                        className="processing-budget-editor"
+                        open={budgetOpen}
+                        onToggle={(e) =>
+                          setBudgetOpen((e.target as HTMLDetailsElement).open)
+                        }
+                      >
+                        <summary>调整本次额度</summary>
+                        <div className="form-grid">
+                          <Field label="模型请求">
+                            <input
+                              type="number"
+                              min={1}
+                              value={budgetValue("requests")}
+                              onChange={(e) =>
+                                changeBudget("requests", e.target.value)
+                              }
+                            />
+                          </Field>
+                          <Field label="输入 token 预留">
+                            <input
+                              type="number"
+                              min={1}
+                              value={budgetValue("inputTokens")}
+                              onChange={(e) =>
+                                changeBudget("inputTokens", e.target.value)
+                              }
+                            />
+                          </Field>
+                          <Field label="输出 token 预留">
+                            <input
+                              type="number"
+                              min={1}
+                              value={budgetValue("outputTokens")}
+                              onChange={(e) =>
+                                changeBudget("outputTokens", e.target.value)
+                              }
+                            />
+                          </Field>
+                          <Field label="累计小时数">
+                            <input
+                              type="number"
+                              min={1}
+                              value={
+                                typeof effectiveBudget?.seconds === "number"
+                                  ? formatHours(effectiveBudget.seconds)
+                                  : ""
+                              }
+                              onChange={(e) =>
+                                changeBudget(
+                                  "seconds",
+                                  e.target.value === ""
+                                    ? ""
+                                    : String(
+                                        Math.floor(Number(e.target.value) * 3600),
+                                      ),
+                                )
+                              }
+                            />
+                          </Field>
+                        </div>
+                        <p className="muted">
+                          额度是整个任务的累计总额；续跑时不会清零已用部分，也不能低于已用量。
+                        </p>
+                      </details>
+                    )}
+                  </div>
                   <p className="muted">
                     {estimating
                       ? "正在核对处理范围与缓存…"
                       : scope?.estimate
-                        ? `所选 ${scope.selectedPages} 页共 ${scope.estimate.selectedBlocks} 块，已有 ${scope.estimate.cachedBlocks} 块可复用；本次最多 ${scope.estimate.requests} 次请求，预留 ${scope.estimate.inputTokens} 输入、${scope.estimate.outputTokens} 输出 token。`
+                        ? `所选 ${scope.selectedPages} 页共 ${scope.estimate.selectedBlocks} 块，已有 ${scope.estimate.cachedBlocks} 块可复用；基础请求 ${scope.estimate.requests} 次，若每次都用一次允许的 429 重试则最多 ${scope.estimate.requestsWithRetryAllowance} 次；预留 ${scope.estimate.inputTokens.toLocaleString()} 输入、${scope.estimate.outputTokens.toLocaleString()} 输出 token（保守预留，不是计费 token）。`
                         : kind === "parse"
                           ? "仅解析全文，不调用翻译模型。"
                           : preview.estimateNote}
                     {scope?.parseRequired &&
                       kind !== "parse" &&
                       " 解析会处理全文，翻译仅处理所选范围。"}
-                    {scope?.exceedsBudget &&
-                      " 所选范围超过本次预算，请缩小页码范围。"}
                     已有版式译文不会被覆盖。
                   </p>
+                  {budgetProblem() && (
+                    <p className="notice error">{budgetProblem()}</p>
+                  )}
+                  {scope?.exceedsBudget && (
+                    <div className="notice error">
+                      <span>
+                        所选范围超出本次额度：
+                        {Object.values<any>(scope.overage || {})
+                          .map(
+                            (detail) =>
+                              `${detail.dimensionLabel}需要 ${detail.required.toLocaleString()}（当前额度 ${detail.limit.toLocaleString()}）`,
+                          )
+                          .join("，")}
+                        。
+                      </span>
+                      <button onClick={applyRequiredBudget}>
+                        使用所需额度
+                      </button>
+                    </div>
+                  )}
                   {!blockId && (
                     <label className="checkbox-row">
                       <input
@@ -372,6 +540,7 @@ export function TranslationDialog({
                     estimating ||
                     !scope ||
                     !!scopeError ||
+                    !!budgetProblem() ||
                     scope.exceedsBudget))
               }
               onClick={() => void submit()}
@@ -484,6 +653,176 @@ export function StructuredSettings() {
     </section>
   );
 }
+// Top-up continuation for a stopped whole-paper translation: the plan is read
+// first (no state change, no model call), then the user confirms the new
+// whole-task total which must cover what the task already used.
+function ResumeBudget({ job, onDone }: { job: any; onDone: () => void }) {
+  const [plan, setPlan] = useState<any>(null);
+  const [draft, setDraft] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [open, setOpen] = useState(false);
+  const limits = plan?.limits || null;
+  const current = draft || plan?.budget || null;
+  const value = (key: string) =>
+    typeof current?.[key] === "number" ? current[key] : "";
+  const required = (key: string) => plan?.required?.[key] ?? 0;
+  function change(key: string, raw: string) {
+    const base = { ...(current || {}) };
+    const parsed = raw.trim() === "" ? undefined : Number(raw);
+    if (parsed === undefined || !Number.isFinite(parsed)) delete base[key];
+    else base[key] = Math.floor(parsed);
+    setDraft(base);
+  }
+  function problem(): string {
+    if (!current) return "";
+    for (const key of ["requests", "inputTokens", "outputTokens", "seconds"] as const) {
+      const number = current[key];
+      if (number === undefined || !Number.isInteger(number) || number < 1)
+        return `${budgetLabels[key]}必须是正整数。`;
+      if (limits && number > limits[key])
+        return `${budgetLabels[key]}超过本次部署上限 ${limits[key].toLocaleString()}。`;
+      if (number < required(key))
+        return `${budgetLabels[key]}不能低于已用与仍需的合计 ${required(key).toLocaleString()}。`;
+    }
+    return "";
+  }
+  async function load() {
+    setBusy(true);
+    setError("");
+    try {
+      const value = await api(
+        `/api/processing/jobs/${job.id}/resume-plan`,
+        "POST",
+        {},
+      );
+      setPlan(value.plan);
+      setDraft({ ...value.plan.budget });
+      setOpen(true);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function resume() {
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/api/processing/jobs/${job.id}/resume`, "POST", {
+        budget: {
+          requests: current.requests,
+          inputTokens: current.inputTokens,
+          outputTokens: current.outputTokens,
+          seconds: current.seconds,
+        },
+      });
+      setPlan(null);
+      setDraft(null);
+      setOpen(false);
+      onDone();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const needsMore =
+    plan &&
+    !problem() &&
+    ["requests", "inputTokens", "outputTokens"].some(
+      (key) => current[key] > plan.budget[key],
+    );
+  return (
+    <div className="processing-resume-budget">
+      <Status error={error} loading={busy} />
+      {!open && (
+        <button onClick={() => void load()}>调整额度并继续未完成部分</button>
+      )}
+      {open && plan && (
+        <>
+          <p className="muted">
+            已预留 {plan.usage.requests} 次请求；未完成范围仍需{" "}
+            {plan.estimate ? `${plan.estimate.requests} 次基础请求` : "解析后才能估算"}
+            。{plan.secondsBasis}
+          </p>
+          {plan.parseRequired && (
+            <p className="notice">
+              尚未解析：解析完成后会显示新的范围与所需额度，解析结果会保留。
+            </p>
+          )}
+          <div className="form-grid">
+            <Field label="模型请求（整个任务累计）">
+              <input
+                type="number"
+                min={1}
+                value={value("requests")}
+                onChange={(e) => change("requests", e.target.value)}
+              />
+            </Field>
+            <Field label="输入 token 预留（累计）">
+              <input
+                type="number"
+                min={1}
+                value={value("inputTokens")}
+                onChange={(e) => change("inputTokens", e.target.value)}
+              />
+            </Field>
+            <Field label="输出 token 预留（累计）">
+              <input
+                type="number"
+                min={1}
+                value={value("outputTokens")}
+                onChange={(e) => change("outputTokens", e.target.value)}
+              />
+            </Field>
+            <Field label="累计小时数">
+              <input
+                type="number"
+                min={1}
+                value={
+                  typeof current?.seconds === "number"
+                    ? formatHours(current.seconds)
+                    : ""
+                }
+                onChange={(e) =>
+                  change(
+                    "seconds",
+                    e.target.value === ""
+                      ? ""
+                      : String(Math.floor(Number(e.target.value) * 3600)),
+                  )
+                }
+              />
+            </Field>
+          </div>
+          <p className="muted">
+            新额度是整个任务的累计总额：已用部分不清零，已完成的块与子单元继续复用。
+          </p>
+          {problem() && <p className="notice error">{problem()}</p>}
+          <div className="button-row">
+            <button
+              disabled={busy || !!problem() || !needsMore}
+              onClick={() => void resume()}
+            >
+              保存额度并继续
+            </button>
+            <button
+              onClick={() => {
+                setOpen(false);
+                setPlan(null);
+                setDraft(null);
+              }}
+            >
+              取消
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function ProcessingTaskDetails({
   id,
   onTerminal,
@@ -533,6 +872,12 @@ export function ProcessingTaskDetails({
     }
   }
   const j = task.data?.job;
+  const translationKind = ["translate", "parse_translate", "retranslate"].includes(
+    j?.kind,
+  );
+  const stoppable = ["failed", "partial", "interrupted", "cancelled"].includes(
+    j?.status || "",
+  );
   return (
     <div className="processing-task">
       <Status error={error || task.error} loading={task.loading && !j} />
@@ -548,9 +893,23 @@ export function ProcessingTaskDetails({
             <p className="notice error">{errorText({ code: j.error })}</p>
           )}
           <p className="muted">
-            已预留请求 {j.usage.requests}/{j.budget.requests}
-            ；停止后不再启动新请求，云端已受理的处理可能继续。
+            已预留 {j.usage.requests}/{j.budget.requests} 次请求、
+            {j.usage.inputTokens.toLocaleString()}/{j.budget.inputTokens.toLocaleString()}{" "}
+            输入、{j.usage.outputTokens.toLocaleString()}/
+            {j.budget.outputTokens.toLocaleString()} 输出预留、已用{" "}
+            {formatHours(j.usage.seconds)}/{formatHours(j.budget.seconds)} 小时。
+            预留是按字节与生成上限的保守预扣，不是计费用量。
           </p>
+          {j.actualUsage && (
+            <p className="muted">
+              供应商实际用量：{j.actualUsage.inputTokens.toLocaleString()} 输入、
+              {j.actualUsage.outputTokens.toLocaleString()} 输出
+              {j.actualUsage.missingAttempts
+                ? `（${j.actualUsage.missingAttempts} 次请求未返回用量，未按 0 记）`
+                : "（全部请求已返回用量）"}
+              。
+            </p>
+          )}
           <div className="button-row">
             {["queued", "running", "cancelling"].includes(j.status) ? (
               <button
@@ -561,9 +920,7 @@ export function ProcessingTaskDetails({
               </button>
             ) : (
               j.kind !== "selection_translate" &&
-              ["failed", "partial", "interrupted", "cancelled"].includes(
-                j.status,
-              ) && (
+              stoppable && (
                 <button onClick={() => void action("resume")}>
                   确认继续未完成部分
                 </button>
@@ -583,6 +940,15 @@ export function ProcessingTaskDetails({
             ["failed", "interrupted", "cancelled"].includes(j.status) && (
               <p>临时划词任务不自动重发；请回到原选区确认重试。</p>
             )}
+          {translationKind && stoppable && (
+            <ResumeBudget
+              job={j}
+              onDone={() => {
+                task.refresh();
+                events.refresh();
+              }}
+            />
+          )}
           <details>
             <summary>任务日志</summary>
             {(j.cloudTasks || []).map((t: any) => (
