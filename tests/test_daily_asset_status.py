@@ -89,16 +89,44 @@ class AssetRepairRequeueTests(unittest.TestCase):
         coordinator.enqueue(owner, "2609.30000v1")
         self.assertEqual(self.row("2609.30000v1")["artifact_status"], "ready")
 
-    def test_forced_enqueue_requeues_a_ready_row(self):
+    def test_ready_row_with_files_is_not_requeued_by_a_duplicate_request(self):
         owner = "00000000-0000-0000-0000-000000000001"
         self.add(owner, "2609.30001v1")
         coordinator = DailyAssetCoordinator(
             str(self.db), lambda *args: AssetResult(True), autostart=False
         )
         coordinator.enqueue(owner, "2609.30001v1", force=True)
-        repaired = self.row("2609.30001v1")
-        self.assertEqual(repaired["artifact_status"], "queued")
-        self.assertIsNone(repaired["artifact_error_code"])
+        row = self.row("2609.30001v1")
+        # Ready and nothing missing: no new work, no reset of the attempt counter.
+        self.assertEqual(row["artifact_status"], "ready")
+        self.assertIsNone(row["requested_stage"])
+
+    def test_thumbnail_stage_requeues_a_ready_row_without_a_cover(self):
+        owner = "00000000-0000-0000-0000-000000000001"
+        self.add(owner, "2609.30003v1")
+        with sqlite3.connect(self.db) as connection:
+            connection.execute(
+                "UPDATE daily_arxiv_candidates SET thumbnail_status='failed' WHERE arxiv_id=?",
+                ("2609.30003v1",),
+            )
+        coordinator = DailyAssetCoordinator(
+            str(self.db), lambda *args: AssetResult(True), autostart=False
+        )
+        coordinator.enqueue(owner, "2609.30003v1", stage="thumbnail")
+        row = self.row("2609.30003v1")
+        self.assertEqual(row["artifact_status"], "queued")
+        self.assertEqual(row["requested_stage"], "thumbnail")
+
+    def test_explicit_pdf_retry_requeues_a_ready_row(self):
+        owner = "00000000-0000-0000-0000-000000000001"
+        self.add(owner, "2609.30004v1")
+        coordinator = DailyAssetCoordinator(
+            str(self.db), lambda *args: AssetResult(True), autostart=False
+        )
+        coordinator.enqueue(owner, "2609.30004v1", force=True, stage="pdf")
+        row = self.row("2609.30004v1")
+        self.assertEqual(row["artifact_status"], "queued")
+        self.assertEqual(row["requested_stage"], "pdf")
 
     def test_forced_enqueue_is_owner_scoped(self):
         owner_one = "00000000-0000-0000-0000-000000000001"
@@ -108,7 +136,7 @@ class AssetRepairRequeueTests(unittest.TestCase):
         coordinator = DailyAssetCoordinator(
             str(self.db), lambda *args: AssetResult(True), autostart=False
         )
-        coordinator.enqueue(owner_one, "2609.30002v1", force=True)
+        coordinator.enqueue(owner_one, "2609.30002v1", force=True, stage="pdf")
         with sqlite3.connect(self.db) as connection:
             rows = {
                 row[0]: row[1]

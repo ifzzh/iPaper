@@ -84,6 +84,28 @@ def test_pending_preview_is_not_cached_as_a_failure(tmp_path, monkeypatch):
     assert response.headers["Cache-Control"] == "no-store"
 
 
+def test_settled_preview_failure_is_reported_as_unavailable(tmp_path, monkeypatch):
+    app, one, _two, manager, _temp = build_app(tmp_path, monkeypatch, {})
+    owner = one["id"] if isinstance(one, dict) else one.id
+    manager._papers[owner] = [
+        {
+            "arxiv_id": "2609.19915v1",
+            "artifact_status": "ready",
+            "thumbnail_path": "",
+            "thumbnail_status": "failed",
+            "cover_status": "failed",
+        }
+    ]
+    client = app.test_client()
+    login(client, "reader_one")
+    response = thumbnail(client, "2026-09-18", "cs.DC", "2609.19915v1")
+    assert response.status_code == 404
+    # A terminal failure must not look like work in progress.
+    assert response.json["error"] == "thumbnail_unavailable"
+    assert response.json["cover_status"] == "failed"
+    assert response.headers["Cache-Control"] == "no-store"
+
+
 def test_existing_preview_is_private_and_versioned(tmp_path, monkeypatch):
     app, one, _two, _manager, temp_papers = build_app(tmp_path, monkeypatch, {})
     owner = one["id"] if isinstance(one, dict) else one.id
