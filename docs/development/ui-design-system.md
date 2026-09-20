@@ -114,21 +114,36 @@
 - **上游公告**：arXiv 批次按 `America/New_York` 的 14:00 截止与 20:00 公告、跳过周末计算（`arxiv_announce_instant`），不用手工夏令时或固定偏移伪造公告日；原始 published/updated 保持不变。
 - **日志**：应用日志经 `ipaper.logging_setup` 以 `+08:00` 渲染；HTTP Date、外部平台原始 UTC 元数据与 Docker 引擎时间保持规范语义。
 
-## 7. Daily 资产状态
+## 7. Daily 资产状态与调度状态
 
 列表必须按真实资产状态显示，且与文件一致：
 
-| 状态 | 含义 | 界面 |
+PDF 状态（`pdf_status`，与 `artifact_status` 同值）与封面状态（`cover_status`）分别显示，不再互相掩盖：
+
+| PDF 状态 | 含义 | 界面 |
 | --- | --- | --- |
-| `ready` | 本地 PDF 存在 | 「PDF 已就绪」 |
-| `candidate` / `queued` / `downloading` / `validating` / `retry_wait` | 尚未获取或正在重试 | 「PDF 待获取 / 排队中 / 获取中 / 校验中」+「重新获取」 |
-| `missing` | 记录说 ready 但文件不存在（已按 owner 重新排队） | 「文件缺失，已重新获取」 |
-| `failed` | 重试耗尽 | 「PDF 获取失败」+「重试获取 PDF」 |
+| `ready` | 本地 PDF 存在且可读 | 「PDF 已就绪」 |
+| `candidate` / `queued` / `downloading` / `validating` | 尚未获取或正在处理 | 「PDF 待获取 / 排队中 / 获取中 / 校验中」+ 主按钮显示状态 |
+| `retry_wait` | 退避等待，含北京时间 | 「PDF 等待重试」+「等待重试：<UTC+8 时刻>」 |
+| `missing` | 记录说 ready 但文件不存在（已按 owner 重新排队） | 「文件缺失，正在重新获取」 |
+| `failed` | 重试耗尽或真实失败 | 「PDF 获取失败」+「重试获取 PDF」 |
 | 无候选行 | 仅元数据 | 「仅元数据」 |
 
-- 论文行与候选行的 arXiv 身份匹配忽略版本后缀与旧式斜杠形式（`normalize_arxiv_id`），否则会出现"记录 ready、文件为空"的静默不一致。
-- 缩略图 GET 只读既有资产，不隐式触发下载；无封面时返回 `thumbnail_pending` 并 `Cache-Control: no-store`，成功时 `private, max-age=300` 且 ETag 取自真实文件修订。缓存键包含 owner，禁止跨用户共享封面。
-- 前端在论文/日期/封面版本或资产状态变化、以及手动重试时重置失败状态，待获取状态做有界自动重试（最多两次），不做无限重试。
+| 封面状态 | 含义 | 界面 |
+| --- | --- | --- |
+| `ready` | 本地真实首图存在 | 显示真实首页预览 |
+| `pending` / `generating` | 排队中或仅封面任务执行中 | 占位显示「预览生成中…」 |
+| `missing` | PDF 可读但还没有封面 | 占位 + 「重新生成封面」（仅重生成封面，不重新下载 PDF） |
+| `failed` | 封面生成失败（PDF 仍可读） | 占位「预览暂不可用」+ 「重新生成封面」 |
+| `unavailable` | PDF 不可用，封面无从生成 | 占位，不提供封面按钮 |
+
+- 论文行与候选行的 arXiv 身份匹配使用 `ipaper.arxiv_identity`：只比较**基础 ID + 显式版本**，接受裸 ID、`vN`、旧式 `category/NNNNNNN`、`arXiv:` 前缀与 URL；SQL 谓词锚定在基础 ID 上，不会命中相邻编号论文；不同 owner 的文件绝不互相复用。
+- 资产执行顺序：解析身份 → **优先复用本地已验证 PDF**（Daily 记录自身、Daily 暂存路径、同 owner 同身份的其他行）→ 仅在缺 PDF 时走受控官方下载 → 用本地 PDF 交给 Document Worker 生成首图 → 原子提交。仅封面失败时 PDF 仍然可读，只标记封面失败。
+- 缩略图 GET 只读既有资产，不隐式触发下载；无封面时返回 `thumbnail_pending`（进行中）或 `thumbnail_unavailable`（终态失败）并 `Cache-Control: no-store`，成功时 `private, max-age=300` 且 ETag 取自真实文件修订。缓存键包含 owner，禁止跨用户共享封面。
+- 前端缓存键由**资产修订**驱动（`coverVersion` + `thumbnail_ready` + 状态），不在每次 render 拼时间戳；图片首次缺失、缓存过期、后台完成或手动重试后无需整页刷新即可恢复；重试次数耗尽后显示准确终态与可用操作，不继续承诺不存在的自动重试。
+- 卡片统一为：封面容器 → 分类/状态标签 → 标题（最多两行）→ 作者（一行）→ 摘要（固定三行高度）→ 底部动作。真实图、加载态、失败态、空态共用**同一固定高度**的封面容器（桌面 210px、≤640px 190px），图片出现不推挤正文；底部动作 `margin-top: auto` 对齐。
+- 操作按论文记录 pending：同一论文的重复点击被忽略，不同卡片可并发；仅当论文**已入库且 PDF 可读**时才标记"已读"并进入阅读器，失败不提前标记，错误就地显示在卡片上。
+- 列表在有活动资产时按 6 秒有界刷新（仅在页面可见且无请求在途时），全部进入终态后停止；刷新保持已渲染卡片与滚动位置，不显示阻塞式加载提示。
 
 ## 8. 维护约定
 

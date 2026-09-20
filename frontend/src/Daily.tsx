@@ -7,6 +7,7 @@ import {
   Search,
   Calendar,
   ImageOff,
+  Clock,
 } from "lucide-react";
 import {
   api,
@@ -30,7 +31,7 @@ export function Daily({
   onSettings: () => void;
   onChanged: () => void;
 }) {
-  const dates = useResource<any>("/api/daily-arxiv/dates", { dates: [] }),
+const dates = useResource<any>("/api/daily-arxiv/dates", { dates: [] }),
     [date, setDate] = useState(""),
     [category, setCategory] = useState(""),
     [query, setQuery] = useState(""),
@@ -38,7 +39,8 @@ export function Daily({
     [fetching, setFetching] = useState(false),
     [startScheduler, setStartScheduler] = useState(false),
     [selected, setSelected] = useState<any>(null),
-    [busy, setBusy] = useState(""),
+    [pending, setPending] = useState<Record<string, string>>({}),
+    [cardErrors, setCardErrors] = useState<Record<string, string>>({}),
     [operation, setOperation] = useState(""),
     [readIds, setReadIds] = useState<string[]>([]);
   useEffect(() => {
@@ -58,12 +60,27 @@ export function Daily({
     (scheduler.data.last_errors || {}) as Record<string, string>,
   );
   const [coverVersions, setCoverVersions] = useState<Record<string, number>>({});
-  const visible = (papers.data.papers || []).filter((p: any) =>
+  const list: any[] = papers.data.papers || [];
+  const visible = list.filter((p: any) =>
     (p.title + " " + p.abstract).toLowerCase().includes(query.toLowerCase()),
   );
+  // Keep refreshing while this view still has papers whose PDF or preview is
+  // being produced, so cards recover on their own. Stops as soon as every
+  // visible paper reached a terminal state, and never runs while hidden or
+  // while a request is already in flight.
+  const activeAssets = list.filter((p: any) => isAssetActive(p)).length;
+  useEffect(() => {
+    if (!activeAssets) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (papers.loading) return;
+      papers.refresh();
+    }, 6000);
+    return () => clearInterval(timer);
+  }, [activeAssets, papers.loading]);
   useEffect(() => {
     const c = new AbortController();
-    const ids = (papers.data.papers || []).map((p: any) => p.arxiv_id);
+    const ids = list.map((p: any) => p.arxiv_id);
     if (ids.length)
       api("/api/daily-arxiv/read-status", "POST", { arxiv_ids: ids }, c.signal)
         .then((r) => {
@@ -80,35 +97,95 @@ export function Daily({
     }, 15000);
     return () => clearInterval(t);
   }, [scheduler.loading]);
+  function markPending(arxivId: string, action: string) {
+    setPending((v) => ({ ...v, [arxivId]: action }));
+  }
+  function clearPending(arxivId: string) {
+    setPending((v) => {
+      const next = { ...v };
+      delete next[arxivId];
+      return next;
+    });
+  }
+  function setCardError(arxivId: string, message: string) {
+    setCardErrors((v) => ({ ...v, [arxivId]: message }));
+  }
+  function clearCardError(arxivId: string) {
+    setCardErrors((v) => {
+      const next = { ...v };
+      delete next[arxivId];
+      return next;
+    });
+  }
   async function add(p: any, read: boolean) {
-    setBusy(p.arxiv_id);
+    if (pending[p.arxiv_id]) return; // one action per paper, duplicates ignored
+    markPending(p.arxiv_id, read ? "read" : "add");
     setError("");
+    clearCardError(p.arxiv_id);
     try {
-      if (read) {
-        await api("/api/daily-arxiv/read/mark", "POST", {
+      let paperId = p.paper_id as string | undefined;
+      let pdfReady = p.pdf_status === "ready" || p.artifact_status === "ready";
+      if (!paperId) {
+        const r = await api("/api/daily-arxiv/add-to-library", "POST", {
           arxiv_id: p.arxiv_id,
+          date,
+          fetch_category: p.fetch_category || p.category || category,
+          use_temp_dir: true,
+          topicIds: [],
         });
-        setReadIds((v) => [...v, p.arxiv_id]);
+        paperId = r.paper?.id || r.paper_id;
+        pdfReady = !!paperId; // the library copy is the readable asset
+        onChanged();
       }
-      if (p.paper_id && read) {
-        onRead(p.paper_id);
+      papers.refresh();
+      if (!read) return;
+      if (p.pdf_status && !pdfReady) {
+        // Never claim a paper was opened when there is no readable PDF yet.
+        setCardError(
+          p.arxiv_id,
+          "PDF 仍在获取，完成后可打开；也可先加入 Reading List。",
+        );
         return;
       }
-      const r = await api("/api/daily-arxiv/add-to-library", "POST", {
-        arxiv_id: p.arxiv_id,
-        date,
-        fetch_category: p.fetch_category || p.category || category,
-        use_temp_dir: true,
-        topicIds: [],
-      });
-      onChanged();
-      papers.refresh();
-      if (read && (r.paper?.id || r.paper_id))
-        onRead(r.paper?.id || r.paper_id);
+      if (!paperId) {
+        setCardError(p.arxiv_id, "已加入，但未取得可打开的文献记录，请重试。");
+        return;
+      }
+      // Only after the paper is genuinely available (and about to open) is it
+      // recorded as read.
+      await api("/api/daily-arxiv/read/mark", "POST", { arxiv_id: p.arxiv_id });
+      setReadIds((v) => (v.includes(p.arxiv_id) ? v : [...v, p.arxiv_id]));
+      onRead(paperId);
     } catch (e) {
-      setError(errorText(e));
+      const message = errorText(e);
+      setCardError(p.arxiv_id, message);
+      setError(message);
     } finally {
-      setBusy("");
+      clearPending(p.arxiv_id);
+    }
+  }
+  async function retryAsset(p: any, stage: "pdf" | "thumbnail") {
+    markPending(p.arxiv_id, "retry");
+    clearCardError(p.arxiv_id);
+    try {
+      await api(
+        "/api/daily-arxiv/papers/" + encodeURIComponent(p.arxiv_id) + "/retry",
+        "POST",
+        { stage },
+      );
+      // A retried cover must not reuse the browser's cached miss.
+      setCoverVersions((v) => ({
+        ...v,
+        [p.arxiv_id]: (v[p.arxiv_id] || 0) + 1,
+      }));
+      papers.refresh();
+      scheduler.refresh();
+    } catch (e) {
+      const message = errorText(e);
+      setCardError(p.arxiv_id, message);
+      setError(message);
+    } finally {
+      clearPending(p.arxiv_id);
     }
   }
   return (
@@ -141,9 +218,7 @@ export function Daily({
         </div>
       )}
       <div className="daily-run-status daily-scheduler-status">
-        <span>
-          {scheduler.data.is_running ? "自动更新已启动" : "自动更新未启动"}
-        </span>
+        <span>{dailyStateLabel(scheduler.data)}</span>
         <span className="daily-times">
           <span>
             最近检查：
@@ -171,6 +246,28 @@ export function Daily({
         {!scheduler.data.is_running && (
           <button onClick={() => setStartScheduler(true)}>启动自动更新</button>
         )}
+        {scheduler.data.is_running &&
+          (scheduler.data.paused ? (
+            <button
+              onClick={async () => {
+                await api("/api/daily-arxiv/scheduler/resume", "POST", {});
+                scheduler.refresh();
+              }}
+            >
+              恢复获取
+            </button>
+          ) : (
+            <button
+              onClick={async () => {
+                await api("/api/daily-arxiv/scheduler/pause", "POST", {
+                  reason: "manual",
+                });
+                scheduler.refresh();
+              }}
+            >
+              暂停获取
+            </button>
+          ))}
       </div>
       <DailyProgress categories={settings.data.categories || []} />
       {startScheduler && (
@@ -228,93 +325,130 @@ export function Daily({
         error={error || dates.error || papers.error}
         loading={papers.loading && !papers.loaded}
       />
-      <div className="daily-grid">
-        {visible.map((p: any) => (
-          <article className="daily-card" key={p.arxiv_id}>
-            <DailyImage
-              date={date}
-              category={p.fetch_category || p.category || category}
-              id={p.arxiv_id}
-              status={p.artifact_status}
-              thumbnailReady={!!p.thumbnail_ready}
-              coverVersion={coverVersions[p.arxiv_id] || 0}
-            />
-            <div className="daily-card-body">
-              <div className="badges">
-                {readIds.includes(p.arxiv_id) && (
-                  <span className="badge">已读</span>
-                )}
-                <span className="badge">
-                  {p.category || p.categories?.[0] || "arXiv"}
-                </span>
-                <span
-                  className={
-                    "badge" +
-                    (p.artifact_status === "failed" ? " danger" : "")
-                  }
-                >
-                  {artifactLabels[p.artifact_status] || "仅元数据"}
-                </span>
-              </div>
-              <button className="card-title" onClick={() => setSelected(p)}>
-                {p.title}
-              </button>
-              <p className="muted">
-                {Array.isArray(p.authors) ? p.authors.join(", ") : p.authors}
-              </p>
-              <p className="daily-summary">
-                {p.summary || p.abstract || "暂无摘要"}
-              </p>
-              <div className="action-row">
-                <button
-                  className="primary"
-                  disabled={busy === p.arxiv_id}
-                  onClick={() => add(p, true)}
-                >
-                  <BookOpen size={15} />
-                  {p.paper_id ? "打开阅读" : "加入并阅读"}
-                </button>
-                <button
-                  aria-label="加入 Reading List"
-                  disabled={busy === p.arxiv_id}
-                  onClick={() => add(p, false)}
-                >
-                  <Plus size={16} />
-                </button>
-                {p.artifact_status !== "ready" && (
-                  <button
-                    disabled={busy === "retry:" + p.arxiv_id}
-                    onClick={async () => {
-                      setBusy("retry:" + p.arxiv_id);
-                      try {
-                        await api(
-                          "/api/daily-arxiv/papers/" +
-                            encodeURIComponent(p.arxiv_id) +
-                            "/retry",
-                          "POST",
-                          {},
-                        );
-                        // A retried cover must not reuse the browser's cached
-                        // failure, so the image is remounted with a new version.
-                        setCoverVersions((v) => ({
-                          ...v,
-                          [p.arxiv_id]: (v[p.arxiv_id] || 0) + 1,
-                        }));
-                        papers.refresh();
-                      } catch (e) {
-                        setError(errorText(e));
-                      } finally {
-                        setBusy("");
-                      }
-                    }}
+<div className="daily-grid">
+        {visible.map((p: any) => {
+          const action = primaryAction(p);
+          const busy = pending[p.arxiv_id];
+          const pdfStatus = p.pdf_status || p.artifact_status;
+          const coverStatus = p.cover_status;
+          const coverBadge =
+            coverStatus && coverStatus !== "ready" && coverStatus !== "pending"
+              ? coverLabels[coverStatus] || ""
+              : "";
+          const retryAt = p.asset_next_retry_at;
+          return (
+            <article className="daily-card" key={p.arxiv_id}>
+              <DailyImage
+                date={date}
+                category={p.fetch_category || p.category || category}
+                id={p.arxiv_id}
+                status={pdfStatus}
+                coverStatus={coverStatus}
+                thumbnailReady={!!p.thumbnail_ready}
+                coverVersion={coverVersions[p.arxiv_id] || 0}
+              />
+              <div className="daily-card-body">
+                <div className="badges">
+                  {readIds.includes(p.arxiv_id) && (
+                    <span className="badge">已读</span>
+                  )}
+                  <span className="badge">
+                    {p.category || p.categories?.[0] || "arXiv"}
+                  </span>
+                  <span
+                    className={
+                      "badge" + (pdfStatus === "failed" ? " danger" : "")
+                    }
                   >
-                    {p.artifact_status === "failed" ? "重试获取 PDF" : "重新获取"}
-                  </button>
+                    {artifactLabels[pdfStatus] || "仅元数据"}
+                  </span>
+                  {coverBadge && (
+                    <span
+                      className={
+                        "badge" + (coverStatus === "failed" ? " danger" : "")
+                      }
+                    >
+                      {coverBadge}
+                    </span>
+                  )}
+                </div>
+                <button
+                  className="card-title"
+                  title={p.title}
+                  onClick={() => setSelected(p)}
+                >
+                  {p.title}
+                </button>
+                <p className="daily-authors">
+                  {Array.isArray(p.authors) ? p.authors.join(", ") : p.authors}
+                </p>
+                <p className="daily-summary">
+                  {p.summary || p.abstract || "暂无摘要"}
+                </p>
+                {pdfStatus === "retry_wait" && retryAt && (
+                  <p className="daily-wait">
+                    {hasInstant(retryAt)
+                      ? `等待重试：${timestampText(retryAt)}`
+                      : "等待下一次自动重试"}
+                  </p>
                 )}
+                {cardErrors[p.arxiv_id] && (
+                  <p className="daily-card-error" role="alert">
+                    {cardErrors[p.arxiv_id]}
+                    <button onClick={() => clearCardError(p.arxiv_id)}>
+                      知道了
+                    </button>
+                  </p>
+                )}
+                <div className="action-row">
+                  {action.kind === "retry-pdf" ? (
+                    <button
+                      className="primary"
+                      disabled={!!busy}
+                      onClick={() => retryAsset(p, "pdf")}
+                    >
+                      <RefreshCw size={15} />
+                      {busy === "retry" ? "正在重试…" : action.label}
+                    </button>
+                  ) : action.kind === "wait" ? (
+                    <button disabled title="PDF 尚未就绪">
+                      <Clock size={15} />
+                      {artifactLabels[pdfStatus] || "PDF 待获取"}
+                    </button>
+                  ) : (
+                    <button
+                      className="primary"
+                      disabled={!!busy}
+                      onClick={() => add(p, true)}
+                    >
+                      <BookOpen size={15} />
+                      {busy === "read" ? "正在准备…" : action.label}
+                    </button>
+                  )}
+                  {!p.paper_id && (
+                    <button
+                      aria-label="加入 Reading List"
+                      disabled={!!busy}
+                      onClick={() => add(p, false)}
+                    >
+                      <Plus size={16} />
+                    </button>
+                  )}
+                  {pdfStatus === "ready" &&
+                    (coverStatus === "failed" || coverStatus === "missing") && (
+                    <button
+                      disabled={!!busy}
+                      onClick={() => retryAsset(p, "thumbnail")}
+                    >
+                      <ImageOff size={15} />
+                      {busy === "retry" ? "正在重试…" : "重新生成封面"}
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          </article>
-        ))}
+            </article>
+          );
+        })}
       </div>
       {!papers.loading && !visible.length && (
         <div className="empty-state">
@@ -386,17 +520,48 @@ export function Daily({
     </section>
   );
 }
-// Status text shared by the card badge and the cover placeholder. Keys mirror
-// the artifact_status values the API reports.
+// One honest label for the discovery scheduler. The API reports the state
+// (stopped/disabled/paused/idle/round_active/paused_waiting); the page never
+// guesses it from log lines or a momentary gap between categories.
+function dailyStateLabel(state: any) {
+  switch (state?.state) {
+    case "round_active":
+      return "正在获取论文（本轮进行中）";
+    case "paused_waiting":
+      return "已暂停新增，等待当前论文收尾";
+    case "paused":
+      return "获取已暂停（维护中）";
+    case "disabled":
+      return "自动更新已关闭";
+    case "idle":
+      return "自动更新已启动，等待下次检查";
+    case "stopped":
+      return "自动更新未启动";
+    default:
+      return state?.is_running ? "自动更新已启动" : "自动更新未启动";
+  }
+}
+
+// Status text shared by the card badge, the cover placeholder and the actions.
+// Keys mirror the pdf_status / cover_status values the API reports.
 const artifactLabels: Record<string, string> = {
   ready: "PDF 已就绪",
   candidate: "PDF 待获取",
   queued: "PDF 排队中",
   downloading: "PDF 获取中",
   validating: "PDF 校验中",
-  retry_wait: "PDF 获取中",
-  missing: "文件缺失，已重新获取",
+  retry_wait: "PDF 等待重试",
+  missing: "文件缺失，正在重新获取",
   failed: "PDF 获取失败",
+};
+
+const coverLabels: Record<string, string> = {
+  ready: "封面已就绪",
+  pending: "封面待生成",
+  generating: "封面生成中",
+  failed: "封面生成失败",
+  missing: "封面待生成",
+  unavailable: "封面不可用",
 };
 
 const PENDING_STATUSES = new Set([
@@ -407,11 +572,34 @@ const PENDING_STATUSES = new Set([
   "retry_wait",
 ]);
 
+function isAssetActive(p: any) {
+  const pdf = String(p.pdf_status || p.artifact_status || "");
+  const cover = String(p.cover_status || "");
+  if (PENDING_STATUSES.has(pdf)) return true;
+  if (cover === "pending" || cover === "generating") return true;
+  // A ready PDF without a preview still has background work worth watching.
+  if (pdf === "ready" && !p.thumbnail_ready && cover !== "failed" && cover !== "unavailable")
+    return true;
+  return false;
+}
+
+// What the primary action should offer for this paper, and what it must not
+// promise. "read" opens an already readable paper; "prepare" fetches it first.
+function primaryAction(p: any) {
+  const pdfReady = p.pdf_status === "ready" || p.artifact_status === "ready";
+  if (p.paper_id && pdfReady) return { kind: "read" as const, label: "打开阅读" };
+  if (pdfReady) return { kind: "read" as const, label: "加入并阅读" };
+  if (String(p.artifact_status) === "failed") {
+    return { kind: "retry-pdf" as const, label: "重试获取 PDF" };
+  }
+  return { kind: "wait" as const, label: "加入阅读列表" };
+}
 function DailyImage({
   date,
   category,
   id,
   status,
+  coverStatus,
   thumbnailReady,
   coverVersion,
 }: {
@@ -419,56 +607,71 @@ function DailyImage({
   category: string;
   id: string;
   status?: string;
+  coverStatus?: string;
   thumbnailReady?: boolean;
   coverVersion?: number;
 }) {
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const src = `/api/daily-arxiv/thumbnail/${encodeURIComponent(date)}/${encodeURIComponent(category || "all")}/${encodeURIComponent(id)}?v=${coverVersion || 0}-${attempt}`;
+  // The cache key is driven by the asset revision (not by render time): a
+  // preview that appears later is fetched once, and a retried cover is not
+  // served from the browser's earlier miss.
+  const revision = `${coverVersion || 0}-${thumbnailReady ? 1 : 0}-${status || ""}-${coverStatus || ""}`;
+  const src = `/api/daily-arxiv/thumbnail/${encodeURIComponent(date)}/${encodeURIComponent(category || "all")}/${encodeURIComponent(id)}?v=${revision}-${attempt}`;
+  const waiting =
+    PENDING_STATUSES.has(status || "") ||
+    coverStatus === "pending" ||
+    coverStatus === "generating";
 
-  // Reset when the paper, date, cover version or asset state changes: a preview
-  // that becomes available later must be retried, not remembered as failed.
+  // Reset when the paper, date or asset revision changes: a preview that becomes
+  // available later must be retried, not remembered as failed.
   useEffect(() => {
     setFailed(false);
     setAttempt(0);
-  }, [id, date, category, coverVersion, thumbnailReady, status]);
+  }, [id, date, category, revision]);
 
-  // Bounded automatic retry while the asset is still being fetched.
+  // Bounded automatic retry, and only while the asset really is in progress.
   useEffect(() => {
-    if (!failed || !PENDING_STATUSES.has(status || "")) return;
+    if (!failed || !waiting) return;
     if (attempt >= 2) return;
     const timer = setTimeout(() => {
       setFailed(false);
       setAttempt((v) => v + 1);
     }, 4000 + attempt * 8000);
     return () => clearTimeout(timer);
-  }, [failed, attempt, status]);
+  }, [failed, attempt, waiting]);
 
-  if (failed) {
+  if (failed || coverStatus === "failed" || coverStatus === "unavailable") {
+    const settled = coverStatus === "failed" || coverStatus === "unavailable";
     return (
-      <div className="daily-cover-placeholder">
-        <ImageOff size={24} />
+      <div className={"daily-cover-placeholder" + (settled ? " settled" : "")}>
+        <ImageOff size={22} />
         <strong>{category || "arXiv"}</strong>
         <small>
-          {PENDING_STATUSES.has(status || "")
-            ? "封面生成中，稍后自动重试"
-            : status === "missing"
-              ? "文件缺失，正在重新获取"
-              : status === "failed"
-                ? "封面获取失败，可手动重试"
-                : "暂无封面"}
+          {settled
+            ? "预览暂不可用，可用卡片上的“重新生成封面”"
+            : waiting
+              ? "预览生成中…"
+              : coverStatus === "missing"
+                ? "预览待生成，可用卡片上的“重新生成封面”"
+                : "暂无预览"}
         </small>
       </div>
     );
   }
   return (
-    <img
-      className="daily-cover"
-      alt="论文首页预览"
-      loading="lazy"
-      src={src}
-      onError={() => setFailed(true)}
-    />
+    <div className="daily-cover-frame">
+      <img
+        className="daily-cover"
+        alt="论文首页预览"
+        loading="lazy"
+        src={src}
+        onError={() => setFailed(true)}
+      />
+      {waiting && !thumbnailReady && (
+        <span className="daily-cover-hint">预览生成中…</span>
+      )}
+    </div>
   );
 }
 

@@ -77,11 +77,44 @@ class DailyArxivDAO:
                  release_date=excluded.release_date, topic_id=excluded.topic_id,
                  relevance_score=excluded.relevance_score,
                  selection_reason=excluded.selection_reason,
-                 artifact_status=excluded.artifact_status,
-                 retry_count=excluded.retry_count, next_retry_at=excluded.next_retry_at,
-                 asset_job_id=excluded.asset_job_id, claimed_at=excluded.claimed_at,
-                 last_attempt_at=excluded.last_attempt_at,
-                 artifact_error_code=excluded.artifact_error_code,
+                 -- Ranking metadata is refreshed, but an asset that is already
+                 -- working, waiting to retry or ready keeps its lifecycle and its
+                 -- backoff: re-discovery must not reset real progress.
+                 artifact_status=CASE
+                   WHEN daily_arxiv_candidates.artifact_status IN
+                        ('ready','queued','downloading','validating','retry_wait')
+                     THEN daily_arxiv_candidates.artifact_status
+                   ELSE excluded.artifact_status END,
+                 retry_count=CASE
+                   WHEN daily_arxiv_candidates.artifact_status IN
+                        ('ready','queued','downloading','validating','retry_wait')
+                     THEN daily_arxiv_candidates.retry_count
+                   ELSE excluded.retry_count END,
+                 next_retry_at=CASE
+                   WHEN daily_arxiv_candidates.artifact_status IN
+                        ('ready','queued','downloading','validating','retry_wait')
+                     THEN daily_arxiv_candidates.next_retry_at
+                   ELSE excluded.next_retry_at END,
+                 asset_job_id=CASE
+                   WHEN daily_arxiv_candidates.artifact_status IN
+                        ('queued','downloading','validating')
+                     THEN daily_arxiv_candidates.asset_job_id
+                   ELSE excluded.asset_job_id END,
+                 claimed_at=CASE
+                   WHEN daily_arxiv_candidates.artifact_status IN
+                        ('queued','downloading','validating')
+                     THEN daily_arxiv_candidates.claimed_at
+                   ELSE excluded.claimed_at END,
+                 last_attempt_at=CASE
+                   WHEN daily_arxiv_candidates.artifact_status IN
+                        ('ready','queued','downloading','validating','retry_wait')
+                     THEN daily_arxiv_candidates.last_attempt_at
+                   ELSE excluded.last_attempt_at END,
+                 artifact_error_code=CASE
+                   WHEN daily_arxiv_candidates.artifact_status IN
+                        ('ready','queued','downloading','validating','retry_wait')
+                     THEN daily_arxiv_candidates.artifact_error_code
+                   ELSE excluded.artifact_error_code END,
                  updated_at=excluded.updated_at''',
             (current_user_id(), paper['arxiv_id'], paper.get('fetch_date') or paper.get('daily_date'),
              topic_id, float(paper.get('relevance_score', 0) or 0), paper.get('selection_reason'),

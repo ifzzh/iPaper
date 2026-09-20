@@ -42,7 +42,10 @@ from ipaper.document_worker.client import (
     DocumentWorkerRejected,
     DocumentWorkerUnavailable,
 )
-from ipaper.document_worker.safety import bounded_copy
+from ipaper.document_worker.safety import DocumentLimitError, bounded_copy
+from ipaper.arxiv_identity import parse_arxiv_identity, same_paper
+from ipaper.security.paths import PathSecurityError, ensure_confined
+import requests
 from ipaper.tools.basic_tools.daily_arxiv_assets import AssetResult
 from ipaper.tools.basic_tools.arxiv_network import (
     arxiv_urlopen,
@@ -641,19 +644,16 @@ def get_arxiv_announce_date(submitted: datetime = None) -> datetime:
 
 
 def normalize_arxiv_id(value: Any) -> str:
-    """Strip an arXiv version suffix for identity comparisons.
+    """Lower-cased base arXiv id (no version, no URL/prefix decorations).
 
-    Daily rows are stored with the announced version (``2609.19915v1``) while the
-    paper row keeps the bare id (``2609.19915``), and older rows may carry a
-    slash form. Matching must ignore those differences or the asset state and
-    the paper record silently disagree.
+    Delegates to :mod:`ipaper.arxiv_identity` so discovery, assets and routes
+    all agree on what counts as the same paper. Unrecognised values return an
+    empty string rather than a truncated guess.
     """
-    text = str(value or "").strip().lower().replace(" ", "")
-    if not text:
-        return ""
-    import re as _re
+    from ...arxiv_identity import parse_arxiv_identity
 
-    return _re.sub(r"v\d+$", "", text)
+    identity = parse_arxiv_identity(value)
+    return identity.key if identity else ""
 
 
 def classify_daily_asset(
@@ -680,6 +680,37 @@ def classify_daily_asset(
         "thumbnail_ready": bool(thumbnail_exists),
         "asset_record_inconsistent": inconsistent,
     }
+
+
+def daily_cover_status(
+    *,
+    pdf_status: str,
+    stored_cover: Optional[str],
+    thumbnail_exists: bool,
+    requested_stage: Optional[str] = None,
+    error_code: Optional[str] = None,
+) -> str:
+    """Cover state derived from facts: a real file, a task, or a failure.
+
+    ``ready``      preview file exists locally
+    ``generating`` a preview-only task is running (or about to)
+    ``failed``     the last preview attempt failed; a manual retry is available
+    ``missing``    no preview yet and none was attempted
+    """
+    if thumbnail_exists:
+        return "ready"
+    stage = str(requested_stage or "").strip().lower()
+    if stage == "thumbnail" and pdf_status in {"queued", "downloading", "validating"}:
+        return "generating"
+    if str(stored_cover or "").strip().lower() == "failed" or error_code:
+        return "failed"
+    if pdf_status == "ready":
+        return "missing"
+    if pdf_status in {"queued", "downloading", "validating", "retry_wait"}:
+        return "pending"
+    if pdf_status in {"missing", "failed"}:
+        return "unavailable"
+    return "missing"
 
 
 def get_today_arxiv_date() -> str:
@@ -1016,6 +1047,18 @@ class DailyArxivManager:
         self._last_success_time: Dict[str, datetime] = {}
         self._last_error: Dict[str, str] = {}
         self._last_check_at: Optional[datetime] = None
+        # Discovery-round state: one round at a time, with an explicit pause so a
+        # deploy tool can tell "thread exists" from "enabled", "round running",
+        # "paused waiting for the current paper" and "idle".
+        self._fetch_round_lock = threading.Lock()
+        self._fetch_round_active = False
+        self._fetch_round_started_at: Optional[datetime] = None
+        self._fetch_round_finished_at: Optional[datetime] = None
+        self._fetch_round_result: Optional[str] = None
+        self._fetch_paused = False
+        self._fetch_pause_reason: Optional[str] = None
+        self._round_skip_reason: Optional[str] = None
+        self._round_skipped_count = 0
         self._last_success_at: Optional[datetime] = None
         self._next_check_at: Optional[datetime] = None
 
@@ -1086,15 +1129,22 @@ class DailyArxivManager:
                 with (job / "work" / "input.pdf").open("rb") as reader:
                     bounded_copy(reader, destination_pdf, self._document_client.limits.max_pdf_bytes)
                 os.chmod(destination_pdf, 0o660)
+            copied_thumbnail = False
             if destination_thumbnail:
                 thumbnail = self._document_client.output(job_id) / "thumbnail.jpg"
-                with thumbnail.open("rb") as reader:
-                    bounded_copy(
-                        reader, destination_thumbnail,
-                        self._document_client.limits.max_thumbnail_bytes,
-                    )
-                os.chmod(destination_thumbnail, 0o660)
-            return result
+                # A missing preview is a preview problem, not a PDF problem: the
+                # caller must still be able to keep the validated PDF.
+                if thumbnail.is_file():
+                    with thumbnail.open("rb") as reader:
+                        bounded_copy(
+                            reader, destination_thumbnail,
+                            self._document_client.limits.max_thumbnail_bytes,
+                        )
+                    os.chmod(destination_thumbnail, 0o660)
+                    copied_thumbnail = True
+            inspected = dict(result or {})
+            inspected["thumbnail_copied"] = copied_thumbnail
+            return inspected
         except Exception:
             return None
         finally:
@@ -1157,6 +1207,14 @@ class DailyArxivManager:
                 thumbnail_exists=bool(thumbnail_path and os.path.exists(thumbnail_path)),
             )
             paper_data.update(classification)
+            paper_data['pdf_status'] = classification['artifact_status']
+            paper_data['cover_status'] = daily_cover_status(
+                pdf_status=classification['artifact_status'],
+                stored_cover=paper_data.get('thumbnail_status'),
+                thumbnail_exists=classification['thumbnail_ready'],
+                requested_stage=paper_data.get('requested_stage'),
+                error_code=paper_data.get('thumbnail_error_code'),
+            )
             if classification['asset_record_inconsistent']:
                 # The record claims the PDF is ready but the file is gone:
                 # requeue the asset through the existing Document Worker path
@@ -2206,38 +2264,88 @@ class DailyArxivManager:
         except Exception:
             return None
 
-    def process_paper_asset(
-        self,
-        arxiv_id: str,
-        stage_callback: Callable[[str, str | None], None],
-    ) -> AssetResult:
-        """Download, validate and atomically promote one already-ranked candidate."""
-        existing = PaperDAO.get_paper_by_arxiv_id(arxiv_id)
-        if not existing or not existing.get("is_daily"):
-            return AssetResult(False, "paper_not_found")
+    def _daily_asset_targets(
+        self, existing: Dict[str, Any], arxiv_id: str
+    ) -> tuple[str, str, str]:
+        """On-disk targets for one Daily asset, derived from its stored key."""
+        request_key = str(arxiv_id or "").strip()
+        stored_key = str(existing.get("arxiv_id") or "").strip()
+        key = request_key if parse_arxiv_identity(request_key) else stored_key
+        if not key:
+            identity = parse_arxiv_identity(request_key) or parse_arxiv_identity(stored_key)
+            key = identity.versioned if identity else ""
+        safe_id = re.sub(r"[^0-9A-Za-z._-]", "_", key.replace("/", "_").replace(":", "_"))
         date_str = existing.get("daily_date") or get_today_arxiv_date()
         category = existing.get("fetch_category") or existing.get("subject") or "cs.AI"
-        paper = ArxivPaper.from_dict({
-            **existing,
-            "published": existing.get("arxiv_published_date"),
-            "updated": existing.get("arxiv_published_date"),
-            "announced": existing.get("daily_date"),
-            "pdf_url": existing.get("arxiv_url"),
-            "primary_category": existing.get("subject"),
-            "fetch_category": category,
-            "fetch_date": date_str,
-        })
         target_dir = self.get_category_dir(date_str, category)
-        os.makedirs(target_dir, exist_ok=True)
-        safe_id = arxiv_id.replace("/", "_").replace(":", "_")
-        pdf_path = os.path.join(target_dir, f"{safe_id}.pdf")
-        thumbnail_path = os.path.join(target_dir, f"{safe_id}_thumbnail.jpg")
-        job_id = str(uuid.uuid4())
-        temporary_pdf = f"{pdf_path}.tmp-{job_id}"
-        temporary_thumbnail = f"{thumbnail_path}.tmp-{job_id}"
+        return (
+            target_dir,
+            os.path.join(target_dir, f"{safe_id}.pdf"),
+            os.path.join(target_dir, f"{safe_id}_thumbnail.jpg"),
+        )
+
+    def _owner_root(self) -> str:
+        """The owner's storage root (the Daily temp dir sits directly below it)."""
+        return os.path.dirname(os.path.abspath(self.base_dir))
+
+    def _confined_local_file(self, path: Any, root: Optional[str] = None) -> Optional[str]:
+        """A safe, existing local file under the given root (or the Daily root)."""
+        if not path:
+            return None
         try:
-            stage_callback("downloading", None)
+            confined = ensure_confined(
+                root or self.base_dir, str(path), must_exist=True, require_file=True
+            )
+        except (PathSecurityError, FileNotFoundError, OSError):
+            return None
+        return str(confined)
+
+    def _locate_local_pdf(
+        self, existing: Dict[str, Any], pdf_path: str, arxiv_id: str
+    ) -> tuple[Optional[str], str]:
+        """Find an already-validated local PDF for this identity.
+
+        Order: the Daily record's own file, the expected staging path (recovery
+        after an interrupted commit), then another row of the same identity for
+        the same owner (for example the library copy). Never another owner's file
+        and never a different paper.
+        """
+        own = self._confined_local_file(existing.get("file_path"))
+        if own:
+            return own, "daily-record"
+        staged = self._confined_local_file(pdf_path)
+        if staged:
+            return staged, "daily-staging"
+        owner_root = self._owner_root()
+        for row in PaperDAO.find_papers_by_identity(arxiv_id):
+            if row.get("id") == existing.get("id"):
+                continue
+            other = self._confined_local_file(row.get("file_path"), owner_root)
+            if other:
+                return other, "library-record"
+        return None, ""
+
+    def _download_daily_pdf(self, existing: Dict[str, Any], destination: str) -> Optional[str]:
+        """Fetch the official PDF into *destination*; returns an error code or None."""
+        date_str = existing.get("daily_date") or get_today_arxiv_date()
+        category = existing.get("fetch_category") or existing.get("subject") or "cs.AI"
+        paper = ArxivPaper.from_dict(
+            {
+                **existing,
+                "published": existing.get("arxiv_published_date"),
+                "updated": existing.get("arxiv_published_date"),
+                "announced": existing.get("daily_date"),
+                "pdf_url": existing.get("arxiv_url"),
+                "primary_category": existing.get("subject"),
+                "fetch_category": category,
+                "fetch_date": date_str,
+            }
+        )
+        try:
             pdf_url = self._get_export_pdf_url(paper)
+        except Exception:
+            return "pdf_url_unavailable"
+        try:
             with new_arxiv_requests_session(pdf_url) as session:
                 response = session.get(
                     pdf_url,
@@ -2247,47 +2355,123 @@ class DailyArxivManager:
                     allow_redirects=True,
                 )
                 if response.status_code != 200:
-                    return AssetResult(False, f"pdf_http_{response.status_code}")
+                    # Kept as a stable code so operators can tell 403/429 apart.
+                    return f"pdf_http_{response.status_code}"
                 response.raw.decode_content = True
-                self._document_client.stage(job_id, "pdf_inspect", response.raw)
-            DocumentJobDAO.create(job_id, "pdf_inspect", paper_id=existing.get("id"))
-            stage_callback("validating", job_id)
-            self._document_client.create(job_id, "pdf_inspect")
-            state = self._document_client.wait(job_id, timeout=100)
-            DocumentJobDAO.update(
-                job_id, state["status"], progress=int(state.get("progress") or 0),
-                error=state.get("error"),
-            )
-            if state.get("status") != "completed":
-                return AssetResult(False, str(state.get("error") or "pdf_invalid"))
-            self._document_client.result_json(job_id)
-            job = self._document_client.job_directory(job_id)
-            with (job / "work" / "input.pdf").open("rb") as reader:
-                bounded_copy(reader, temporary_pdf, self._document_client.limits.max_pdf_bytes)
-            thumbnail = self._document_client.output(job_id) / "thumbnail.jpg"
-            with thumbnail.open("rb") as reader:
                 bounded_copy(
-                    reader, temporary_thumbnail,
-                    self._document_client.limits.max_thumbnail_bytes,
+                    response.raw, destination, self._document_client.limits.max_pdf_bytes
                 )
-            os.chmod(temporary_pdf, 0o660)
-            os.chmod(temporary_thumbnail, 0o660)
-            os.replace(temporary_pdf, pdf_path)
-            os.replace(temporary_thumbnail, thumbnail_path)
+        except requests.Timeout:
+            return "pdf_timeout"
+        except DocumentLimitError:
+            return "pdf_too_large"
+        except Exception:
+            return "pdf_download_failed"
+        return None
+
+    def process_paper_asset(
+        self,
+        arxiv_id: str,
+        stage_callback: Callable[[str, str | None], None],
+    ) -> AssetResult:
+        """Make one Daily paper readable and give it a real first-page preview.
+
+        Stages: resolve identity -> reuse a local PDF when one exists -> download
+        only when there is none -> generate the preview from the local file ->
+        commit atomically. A readable PDF whose preview failed is still a
+        readable paper: the PDF is committed, the preview is reported separately
+        and only the preview needs a retry.
+        """
+        existing = PaperDAO.get_daily_paper_by_identity(arxiv_id)
+        if not existing or not existing.get("is_daily"):
+            return AssetResult(False, "paper_not_found")
+        identity = parse_arxiv_identity(arxiv_id) or parse_arxiv_identity(
+            existing.get("arxiv_id")
+        )
+        if identity is None:
+            return AssetResult(False, "invalid_arxiv_id")
+        if self._document_client is None:
+            return AssetResult(False, "document_worker_unavailable")
+
+        # The requested stage lives on the queue row, not on the paper record.
+        candidate = DailyArxivDAO.get_candidate(arxiv_id) or {}
+        requested = str(
+            candidate.get("requested_stage") or existing.get("requested_stage") or "all"
+        ).strip().lower()
+        target_dir, pdf_path, thumbnail_path = self._daily_asset_targets(existing, arxiv_id)
+        os.makedirs(target_dir, exist_ok=True)
+        job_id = str(uuid.uuid4())
+        temporary_pdf = f"{pdf_path}.tmp-{job_id}"
+        temporary_thumbnail = f"{thumbnail_path}.tmp-{job_id}"
+
+        source_path, origin = self._locate_local_pdf(existing, pdf_path, arxiv_id)
+        downloaded = False
+        try:
+            if source_path is None:
+                if requested == "thumbnail":
+                    # A cover retry needs a readable PDF; there is none yet.
+                    return AssetResult(False, "pdf_missing")
+                stage_callback("downloading", None)
+                error = self._download_daily_pdf(existing, temporary_pdf)
+                if error:
+                    return AssetResult(False, error)
+                source_path, origin, downloaded = temporary_pdf, "download", True
+
+            stage_callback("validating", job_id)
+            # The worker validates the bytes it inspects; when the source is not
+            # already the final path we also keep its validated copy.
+            keep_pdf = downloaded or origin != "daily-record" or os.path.abspath(source_path) != os.path.abspath(pdf_path)
+            with open(source_path, "rb") as source:
+                inspected = self._inspect_pdf(
+                    source,
+                    destination_pdf=temporary_pdf if keep_pdf else None,
+                    destination_thumbnail=temporary_thumbnail,
+                )
+            if not inspected:
+                return AssetResult(False, "pdf_invalid")
+
+            if not keep_pdf:
+                # Nothing to replace: the validated PDF already lives at pdf_path.
+                pass
+            else:
+                os.chmod(temporary_pdf, 0o660)
+                os.replace(temporary_pdf, pdf_path)
+
+            cover_ready = bool(inspected.get("thumbnail_copied")) and os.path.exists(
+                temporary_thumbnail
+            )
+            cover_error = None
+            if cover_ready:
+                os.chmod(temporary_thumbnail, 0o660)
+                os.replace(temporary_thumbnail, thumbnail_path)
+            else:
+                cover_error = "thumbnail_failed"
+
             updated = dict(existing)
-            updated.update({
-                "file_path": pdf_path,
-                "thumbnail_path": thumbnail_path,
-                "artifact_status": "ready",
-                "asset_next_retry_at": None,
-                "artifact_error_code": None,
-            })
+            updated.update(
+                {
+                    "file_path": pdf_path,
+                    "thumbnail_path": thumbnail_path if cover_ready else None,
+                    "artifact_status": "ready",
+                    "asset_next_retry_at": None,
+                    "artifact_error_code": None,
+                    "thumbnail_status": "ready" if cover_ready else "failed",
+                    "thumbnail_error_code": cover_error,
+                    "requested_stage": None,
+                }
+            )
             PaperDAO.save_paper(updated)
-            return AssetResult(True)
+            if cover_ready:
+                return AssetResult(True, thumbnail_status="ready")
+            # Readable paper, missing preview: success for the read path, with an
+            # explicit cover state instead of retrying the whole asset.
+            return AssetResult(True, "thumbnail_failed", thumbnail_status="failed")
         except DocumentWorkerRejected as exc:
             return AssetResult(False, exc.reason)
         except DocumentWorkerUnavailable as exc:
             return AssetResult(False, str(exc) or "document_worker_unavailable")
+        except DocumentLimitError:
+            return AssetResult(False, "pdf_too_large")
         except Exception:
             return AssetResult(False, "pdf_download_failed")
         finally:
@@ -2570,6 +2754,136 @@ class DailyArxivManager:
         return dates
 
     def _do_scheduled_fetch(self):
+        """Run one discovery round, or explain why this request was skipped.
+
+        A round is skipped when another round is already active, when automatic
+        updates are disabled, or when fetching is paused for maintenance. The
+        decision is re-checked here (after any wait) and again at every date
+        boundary inside the round, so a queued round cannot start after the user
+        turned Daily off.
+        """
+        with self._fetch_round_lock:
+            if self._fetch_round_active:
+                self._round_skip_reason = "round_active"
+                self._round_skipped_count += 1
+                print("[DailyArxiv] A discovery round is already running; skipping duplicate work")
+                return
+            settings = self.get_settings()
+            if not settings.get("enabled", False):
+                self._round_skip_reason = "disabled"
+                self._round_skipped_count += 1
+                print("[DailyArxiv] Daily arXiv is disabled; skipping queued round")
+                return
+            if self._fetch_paused:
+                self._round_skip_reason = "paused"
+                self._round_skipped_count += 1
+                print("[DailyArxiv] Fetching is paused; skipping queued round")
+                return
+            self._fetch_round_active = True
+            self._fetch_round_started_at = now_utc()
+            self._fetch_round_result = None
+            self._round_skip_reason = None
+        try:
+            self._run_fetch_round()
+            with self._fetch_round_lock:
+                self._fetch_round_result = "completed"
+        except Exception as exc:  # noqa: BLE001 - a failed round must not kill the scheduler
+            with self._fetch_round_lock:
+                self._fetch_round_result = f"failed: {exc}"
+            print(f"[DailyArxiv] Discovery round failed: {exc}")
+        finally:
+            with self._fetch_round_lock:
+                self._fetch_round_active = False
+                self._fetch_round_finished_at = now_utc()
+
+    def pause_fetching(self, reason: str = "maintenance") -> Dict[str, Any]:
+        """Stop starting new discovery work; the current paper still finishes."""
+        self._fetch_paused = True
+        self._fetch_pause_reason = reason
+        return self.get_fetch_state()
+
+    def resume_fetching(self) -> Dict[str, Any]:
+        self._fetch_paused = False
+        self._fetch_pause_reason = None
+        return self.get_fetch_state()
+
+    def should_stop_round(self) -> Optional[str]:
+        """Why the current round should not start more work, if any."""
+        if self._fetch_paused:
+            return "paused"
+        if not self.get_settings().get("enabled", False):
+            return "disabled"
+        return None
+
+    def get_fetch_state(self) -> Dict[str, Any]:
+        """A state tools and the UI can trust without reading log lines."""
+        settings = self.get_settings()
+        enabled = bool(settings.get("enabled", False))
+        thread_running = bool(self._scheduler_running)
+        active = bool(self._fetch_round_active)
+        paused = bool(self._fetch_paused)
+        if active:
+            state = "paused_waiting" if paused else "round_active"
+        elif paused:
+            state = "paused"
+        elif not thread_running:
+            state = "stopped"
+        elif not enabled:
+            state = "disabled"
+        else:
+            state = "idle"
+        return {
+            "state": state,
+            "scheduler_thread_running": thread_running,
+            "enabled": enabled,
+            "paused": paused,
+            "pause_reason": self._fetch_pause_reason,
+            "round_active": active,
+            "round_started_at": (
+                utc_iso(self._fetch_round_started_at) if self._fetch_round_started_at else None
+            ),
+            "round_finished_at": (
+                utc_iso(self._fetch_round_finished_at) if self._fetch_round_finished_at else None
+            ),
+            "round_result": self._fetch_round_result,
+            "round_skipped_count": self._round_skipped_count,
+            "round_skip_reason": self._round_skip_reason,
+            "busy": active,
+        }
+
+    def run_manual_fetch(
+        self, categories, date_str: str, force: bool = False
+    ) -> Dict[str, Any]:
+        """Manual fetch shares the single-round guard with the scheduler.
+
+        Returns ``{"started": False, "reason": "round_active"}`` when a round is
+        already running, so the caller can tell the user instead of silently
+        starting a second round of model work.
+        """
+        with self._fetch_round_lock:
+            if self._fetch_round_active:
+                self._round_skip_reason = "round_active"
+                self._round_skipped_count += 1
+                return {"started": False, "reason": "round_active"}
+            self._fetch_round_active = True
+            self._fetch_round_started_at = now_utc()
+            self._fetch_round_result = None
+            self._round_skip_reason = None
+        result = "failed"
+        try:
+            self.fetch_categories_for_date(categories, date_str=date_str, force=force)
+            result = "completed"
+            return {"started": True, "reason": result}
+        except Exception as exc:  # noqa: BLE001 - report, keep the guard honest
+            result = f"failed: {exc}"
+            raise
+        finally:
+            with self._fetch_round_lock:
+                self._fetch_round_active = False
+                self._fetch_round_finished_at = now_utc()
+                self._fetch_round_result = result
+
+    def _run_fetch_round(self):
         """Execution plan capture"""
         settings = self.get_settings()
 
@@ -2618,6 +2932,11 @@ class DailyArxivManager:
             print(
                 "[DailyArxiv] LLM API Not configured, continue fetching papers without LLM."
             )
+
+        stop_reason = self.should_stop_round()
+        if stop_reason:
+            print(f"[DailyArxiv] Round stopped before crawling ({stop_reason})")
+            return
 
         print(f"[DailyArxiv] Start scheduled crawling: {categories}")
 
@@ -2701,6 +3020,15 @@ class DailyArxivManager:
 
             # Fetch each date in order (newest first)
             for date_str in dates_to_fetch:
+                # Safe boundary: honour a pause or a disable between dates; the
+                # date already running finishes with its results kept.
+                stop_reason = self.should_stop_round()
+                if stop_reason:
+                    print(
+                        f"[DailyArxiv] Stopping after the current date ({stop_reason});"
+                        f" remaining: {dates_to_fetch[dates_to_fetch.index(date_str):]}"
+                    )
+                    break
                 try:
                     print(f"[DailyArxiv] crawl categories for {date_str} thesis...")
                     self.fetch_categories_for_date(

@@ -25,8 +25,16 @@ BACKOFF_MINUTES = (5, 30, 120, 360)
 
 @dataclass(frozen=True)
 class AssetResult:
+    """Outcome of one asset task.
+
+    ``success`` means the task's requested stage completed. ``error_code`` may
+    still be set on success: a readable PDF whose preview failed is a success
+    for the read path, and only the preview is reported as failed.
+    """
+
     success: bool
     error_code: str | None = None
+    thumbnail_status: str | None = None
 
 
 class DailyAssetCoordinator:
@@ -77,8 +85,23 @@ class DailyAssetCoordinator:
                 (now,),
             )
 
-    def enqueue(self, owner_id: str, arxiv_id: str, *, force: bool = False) -> dict | None:
+    def enqueue(
+        self,
+        owner_id: str,
+        arxiv_id: str,
+        *,
+        force: bool = False,
+        stage: str | None = None,
+    ) -> dict | None:
+        """Queue one asset task, without disturbing work already in progress.
+
+        ``stage`` is ``pdf`` (download + preview), ``thumbnail`` (preview only,
+        reusing a local PDF) or None for "whatever is missing". A duplicate
+        enqueue never resets an in-flight task, a ready asset or its backoff
+        counter: only genuinely new work is queued.
+        """
         now = self._now()
+        requested = (stage or "all").strip().lower()
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT * FROM daily_arxiv_candidates WHERE owner_id=? AND "
@@ -90,16 +113,28 @@ class DailyAssetCoordinator:
                 return None
             # Address the row by its stored key from here on.
             arxiv_id = row["arxiv_id"]
-            if row["artifact_status"] == "ready" and not force:
-                return dict(row)
             if row["artifact_status"] in {"queued", "downloading", "validating"}:
+                # Already working: a duplicate request must not restart it.
                 return dict(row)
+            if row["artifact_status"] == "ready":
+                cover_ready = (row["thumbnail_status"] or "ready") == "ready"
+                if requested == "thumbnail" and not cover_ready:
+                    pass  # regenerate the preview only
+                elif requested == "pdf" and force:
+                    pass  # explicit re-fetch of the PDF
+                else:
+                    # Nothing missing (or no explicit intent): keep the asset and
+                    # its backoff counter untouched.
+                    return dict(row)
             connection.execute(
                 """UPDATE daily_arxiv_candidates
                    SET artifact_status='queued', next_retry_at=NULL, asset_job_id=NULL,
-                       claimed_at=NULL, artifact_error_code=NULL, updated_at=?
+                       claimed_at=NULL, artifact_error_code=NULL,
+                       thumbnail_error_code=CASE WHEN ?='thumbnail'
+                           THEN thumbnail_error_code ELSE NULL END,
+                       requested_stage=?, updated_at=?
                    WHERE owner_id=? AND arxiv_id=?""",
-                (now, owner_id, arxiv_id),
+                (requested, requested, now, owner_id, arxiv_id),
             )
             row = connection.execute(
                 "SELECT * FROM daily_arxiv_candidates WHERE owner_id=? AND arxiv_id=?",
@@ -168,7 +203,10 @@ class DailyAssetCoordinator:
         code = result.error_code or "document_processing_failed"
         attempts = int(task.get("retry_count") or 0)
         if result.success:
-            status, next_retry, code = "ready", None, None
+            # A successful task may still report a failed preview; the PDF state
+            # is ready and only the preview carries an error.
+            status, next_retry = "ready", None
+            code = result.error_code if result.thumbnail_status == "failed" else None
         elif code in INFRASTRUCTURE_ERRORS:
             status, next_retry = "retry_wait", now + timedelta(seconds=60)
         else:
@@ -176,13 +214,24 @@ class DailyAssetCoordinator:
             status = "failed" if attempts >= 5 else "retry_wait"
             delay = BACKOFF_MINUTES[min(attempts - 1, len(BACKOFF_MINUTES) - 1)]
             next_retry = None if status == "failed" else now + timedelta(minutes=delay)
+        thumbnail_status = result.thumbnail_status if result.success else None
         with self._connect() as connection:
             connection.execute(
                 """UPDATE daily_arxiv_candidates
                    SET artifact_status=?, retry_count=?, next_retry_at=?,
-                       artifact_error_code=?, asset_job_id=NULL, claimed_at=NULL, updated_at=?
+                       artifact_error_code=?, asset_job_id=NULL, claimed_at=NULL,
+                       requested_stage=NULL,
+                       thumbnail_status=COALESCE(?, thumbnail_status),
+                       thumbnail_error_code=CASE
+                           WHEN ?='failed' THEN ?
+                           WHEN ?='ready' THEN NULL
+                           ELSE thumbnail_error_code END,
+                       updated_at=?
                    WHERE owner_id=? AND arxiv_id=? AND asset_job_id=?""",
                 (status, attempts, next_retry.isoformat() if next_retry else None, code,
+                 thumbnail_status,
+                 thumbnail_status, code,
+                 thumbnail_status,
                  now.isoformat(), task["owner_id"], task["arxiv_id"], task["asset_job_id"]),
             )
 

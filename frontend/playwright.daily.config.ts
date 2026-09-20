@@ -1,18 +1,13 @@
 import base from "./playwright.config";
 import { defineConfig } from "@playwright/test";
+
+// Focused Daily suite: its own server seeds extra synthetic asset states, so the
+// shared unified sequence keeps its minimal Day view.
 export default defineConfig({
   ...base,
   testDir: "./unified-tests",
-  testIgnore: [
-    "daily-states.spec.ts",
-    "topics-loading.spec.ts",
-    "list-loading.spec.ts",
-    "structured.spec.ts",
-    "understanding.spec.ts",
-    "reading-tools.spec.ts",
-    "metadata.spec.ts",
-    "keywords.spec.ts",
-  ],
+  testMatch: ["daily-states.spec.ts"],
+  testIgnore: [],
   use: {
     ...base.use,
     launchOptions: {
@@ -23,7 +18,7 @@ export default defineConfig({
   webServer: {
     ...(base.webServer as object),
     command:
-      "cd .. && exec env PYTHON_DOTENV_DISABLED=1 .venv/bin/python -m tests.unified_server",
+      "cd .. && exec env PYTHON_DOTENV_DISABLED=1 IPAPER_BROWSER_DAILY_STATES=1 .venv/bin/python -m tests.unified_server",
     url: "http://127.0.0.2:7191/",
     timeout: 60000,
   },

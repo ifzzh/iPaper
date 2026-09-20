@@ -1715,7 +1715,7 @@ progress {
   align-items: center;
   flex-wrap: wrap;
   padding: 12px 0 22px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .daily-filters > label:first-child {
   display: flex;
@@ -1724,7 +1724,9 @@ progress {
 }
 .daily-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(275px, 1fr));
+  /* Cards keep a comfortable reading width instead of being squeezed to fit a
+     fixed number of columns. */
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
   gap: 18px;
 }
 .daily-card {
@@ -1732,63 +1734,143 @@ progress {
   border-radius: 13px;
   overflow: hidden;
   background: var(--surface);
+  /* One vertical rhythm for every card: cover, badges, title, authors, summary,
+     then actions pinned to the bottom. */
+  display: flex;
+  flex-direction: column;
+}
+/* Real cover, loading, failure and empty states share one frame so the body
+   never moves when an image appears. */
+.daily-cover-frame,
+.daily-cover-placeholder {
+  position: relative;
+  width: 100%;
+  /* A fixed height keeps every state byte-identical in size, so an image
+     appearing never nudges the card's text. */
+  height: 210px;
+  background: var(--subtle);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
 }
 .daily-cover {
   display: block;
   width: 100%;
-  height: 180px;
+  height: 100%;
   object-fit: cover;
   object-position: top;
-  background: var(--subtle);
-  border-bottom: 1px solid var(--border);
+}
+.daily-cover-hint {
+  position: absolute;
+  inset: auto 8px 8px auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.62);
+  color: #fff;
+  font-size: 12px;
 }
 .daily-cover-placeholder {
-  height: 130px;
-  background: var(--accent-bg);
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  gap: 7px;
-  color: var(--accent);
+  gap: 8px;
+  color: var(--muted);
+  background: var(--subtle);
+}
+.daily-cover-placeholder.settled {
+  color: var(--muted);
+}
+.daily-cover-placeholder strong {
+  font-size: 13px;
+  font-weight: 600;
 }
 .daily-cover-placeholder small {
-  font-size: 10px;
+  font-size: 12px;
+  max-width: 90%;
+  text-align: center;
+  line-height: 1.5;
 }
 .daily-card-body {
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 2px;
 }
 .card-title {
   white-space: normal;
   text-align: left;
   border: 0;
-  padding: 12px 0 8px;
+  padding: 10px 0 6px;
   font-weight: 650;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.4;
   background: transparent;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.daily-authors {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .daily-card .muted {
-  font-size: 11px;
+  font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .daily-summary {
-  font-size: 12px;
-  line-height: 1.65;
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
   color: var(--muted);
   display: -webkit-box;
-  -webkit-line-clamp: 4;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  /* Stable rhythm: every card reserves the same summary height. */
+  min-height: calc(1.6em * 3);
+}
+.daily-wait {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.daily-card-error {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--danger, #b42318);
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.daily-card-error button {
+  flex: none;
+  font-size: 12px;
+  padding: 2px 8px;
+}
+.daily-card .action-row {
+  margin-top: auto;
+  padding-top: 14px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 .daily-card .action-row button {
-  font-size: 11px;
+  font-size: 13px;
+}
+.daily-card .action-row button.primary {
+  flex: 1;
+  min-width: 132px;
 }
 .settings-page {
   height: 100%;
@@ -2838,7 +2920,11 @@ progress {
   .daily-grid {
     grid-template-columns: 1fr;
   }
-  .daily-cover {
+  .card-title {
+    font-size: 15px;
+  }
+  .daily-cover-frame,
+  .daily-cover-placeholder {
     height: 190px;
   }
   .daily-filters {

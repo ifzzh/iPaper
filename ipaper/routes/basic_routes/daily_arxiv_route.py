@@ -501,21 +501,48 @@ def register_daily_arxiv_routes(
 
     @app.route("/api/daily-arxiv/papers/<path:arxiv_id>/retry", methods=["POST"])
     def api_retry_daily_arxiv_asset(arxiv_id: str):
-        """Queue a retry for one failed PDF without reranking the whole day."""
+        """Queue the missing stage for one paper without reranking the whole day.
+
+        ``stage`` is ``thumbnail`` to only regenerate the first-page preview
+        (which reuses the readable local PDF) or ``pdf`` to fetch the PDF again.
+        Without an explicit stage the missing piece is inferred, so a readable
+        paper with a broken preview is never forced to re-download.
+        """
         paper = PaperDAO.get_paper_by_arxiv_id(arxiv_id)
         if not paper:
             return jsonify({"success": False, "error": "paper_not_found"}), 404
-        candidate = DailyArxivDAO.get_candidate(arxiv_id)
-        if candidate and candidate.get("artifact_status") == "ready":
+        candidate = DailyArxivDAO.get_candidate(arxiv_id) or {}
+        requested = str((request.json or {}).get("stage") or "").strip().lower()
+        if requested not in {"", "pdf", "thumbnail", "all"}:
+            return jsonify({"success": False, "error": "unsupported_stage"}), 400
+
+        pdf_path = paper.get("file_path")
+        thumbnail_path = paper.get("thumbnail_path")
+        pdf_ready = bool(pdf_path and os.path.exists(pdf_path))
+        cover_ready = bool(thumbnail_path and os.path.exists(thumbnail_path))
+        if not requested:
+            requested = "thumbnail" if pdf_ready and not cover_ready else "pdf"
+        if requested == "thumbnail" and not pdf_ready:
+            # There is nothing to preview yet; fetch the PDF instead of failing.
+            requested = "pdf"
+        if requested == "thumbnail" and cover_ready:
+            return jsonify({"success": False, "error": "cover_already_ready"}), 409
+        if requested == "pdf" and pdf_ready and cover_ready:
             return jsonify({"success": False, "error": "asset_already_ready"}), 409
         if asset_coordinator is None:
             return jsonify({"success": False, "error": "document_worker_unavailable"}), 503
-        queued = asset_coordinator.enqueue(current_user_id(), arxiv_id, force=True)
+        queued = asset_coordinator.enqueue(
+            current_user_id(),
+            candidate.get("arxiv_id") or arxiv_id,
+            force=requested == "pdf",
+            stage=requested,
+        )
         if queued is None:
             return jsonify({"success": False, "error": "paper_not_found"}), 404
         return jsonify({
             "success": True,
             "status": queued.get("artifact_status"),
+            "stage": queued.get("requested_stage") or requested,
             "queue_position": asset_coordinator.queue_position(current_user_id(), arxiv_id),
         }), 202
 
@@ -560,16 +587,44 @@ def register_daily_arxiv_routes(
             if not categories:
                 return jsonify({"success": False, "error": "No partition configured"}), 400
 
-            # Execute the crawl in a background thread
+            state = manager.get_fetch_state()
+            if state.get("round_active"):
+                # A second identical round would re-run model filtering for the
+                # same dates; say so instead of starting it quietly.
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "round_already_running",
+                            "message": "已有一轮 Daily 发现正在进行，完成后再试。",
+                        }
+                    ),
+                    409,
+                )
+            if state.get("paused"):
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "fetching_paused",
+                            "message": "Daily 获取已暂停（维护中），请先恢复。",
+                        }
+                    ),
+                    409,
+                )
+
+            # Execute the crawl in a background thread, through the same
+            # single-round guard the scheduler uses.
             def do_fetch_all():
-                manager.fetch_categories_for_date(
+                started = manager.run_manual_fetch(
                     categories,
                     date_str=date_str,
                     force=force,
                 )
-                # Clear all thumbnail caches after crawling is complete
-                with _thumbnail_cache_lock:
-                    _thumbnail_cache.clear()
+                if started.get("started"):
+                    # Clear all thumbnail caches after crawling is complete
+                    with _thumbnail_cache_lock:
+                        _thumbnail_cache.clear()
 
             try:
                 task_executor.submit(do_fetch_all)
@@ -1055,11 +1110,24 @@ def register_daily_arxiv_routes(
 
             thumbnail_path = paper.get("thumbnail_path")
             asset_status = paper.get("artifact_status")
+            cover_status = paper.get("cover_status")
+            if not cover_status:
+                from ipaper.tools.basic_tools.daily_arxiv import daily_cover_status
+
+                cover_status = daily_cover_status(
+                    pdf_status=str(paper.get("artifact_status") or ""),
+                    stored_cover=paper.get("thumbnail_status"),
+                    thumbnail_exists=False,
+                )
+            # A settled failure must not look like work in progress: the view
+            # offers "重新生成封面" instead of promising an automatic retry.
+            waiting = cover_status in {"pending", "generating"}
             pending = jsonify(
                 {
                     "success": False,
-                    "error": "thumbnail_pending",
+                    "error": "thumbnail_pending" if waiting else "thumbnail_unavailable",
                     "artifact_status": asset_status,
+                    "cover_status": cover_status,
                 }
             )
             if not thumbnail_path:
@@ -1165,10 +1233,16 @@ def register_daily_arxiv_routes(
             last_check_at = getattr(manager, "_last_check_at", None)
             last_success_at = getattr(manager, "_last_success_at", None)
             next_check_at = getattr(manager, "_next_check_at", None)
+            fetch_state = {}
+            try:
+                fetch_state = manager.get_fetch_state()
+            except Exception:  # noqa: BLE001 - status must never fail the page
+                fetch_state = {}
             return jsonify(
                 {
                     "success": True,
                     "is_running": bool(getattr(manager, "_scheduler_running", False)),
+                    **fetch_state,
                     "llm_configured": bool(is_llm_configured()),
                     "llm_api_failed": bool(getattr(manager, "_llm_api_failed", False)),
                     "llm_api_error_message": getattr(
@@ -1192,6 +1266,25 @@ def register_daily_arxiv_routes(
                 }
             )
         except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    @app.route("/api/daily-arxiv/scheduler/pause", methods=["POST"])
+    def api_scheduler_pause():
+        """Stop starting new discovery work; the current paper still finishes."""
+        try:
+            payload = request.json or {}
+            reason = str(payload.get("reason") or "manual").strip()[:120] or "manual"
+            state = manager.pause_fetching(reason)
+            return jsonify({"success": True, **state})
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    @app.route("/api/daily-arxiv/scheduler/resume", methods=["POST"])
+    def api_scheduler_resume():
+        try:
+            state = manager.resume_fetching()
+            return jsonify({"success": True, **state})
+        except Exception as exc:  # noqa: BLE001
             return jsonify({"success": False, "error": str(exc)}), 500
 
     @app.route("/api/daily-arxiv/scheduler/start", methods=["POST"])

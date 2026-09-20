@@ -8,6 +8,7 @@ import os
 import tempfile
 import json
 import shutil
+import sqlite3
 from pathlib import Path
 
 from pytest import MonkeyPatch
@@ -104,6 +105,34 @@ if __name__ == "__main__":
             shutil.copyfile(Path(__file__).parent/'fixtures/workbench/translated.pdf',pdf)
             paper={'id':'daily-synthetic','arxiv_id':'2609.99999','title':'Daily 合成验收：从发现到阅读','authors':'iPaper tests','abstract':'自制合成样例，不是生产论文。','is_daily':True,'daily_date':'2026-09-10','fetch_date':'2026-09-10','fetch_category':'cs.AI','subject':'cs.AI','categories':['cs.AI'],'file_path':str(pdf),'artifact_status':'ready'}
             PaperDAO.save_paper(paper);DailyArxivDAO.save_candidate(paper)
+            if os.getenv('IPAPER_BROWSER_DAILY_STATES')=='1':
+                # Extra synthetic states for the focused Daily asset suite: a
+                # readable paper without a preview, one waiting to retry and one
+                # whose PDF fetch failed. Gated so shared suites are unaffected.
+                from ipaper.timeutil import utc_iso, now_utc
+                states=[
+                    {'arxiv_id':'2609.99901','title':'Daily 合成：PDF 可读但缺封面','artifact_status':'ready','with_pdf':True,'thumbnail_status':'failed','cover_status':'failed'},
+                    {'arxiv_id':'2609.99902','title':'Daily 合成：等待重试 PDF','artifact_status':'retry_wait','with_pdf':False,'next_retry_at':utc_iso(now_utc())},
+                    {'arxiv_id':'2609.99903','title':'Daily 合成：PDF 获取失败','artifact_status':'failed','with_pdf':False},
+                ]
+                for item in states:
+                    path=daily_root/f"{item['arxiv_id']}v1.pdf"
+                    if item['with_pdf']:
+                        shutil.copyfile(Path(__file__).parent/'fixtures/workbench/translated.pdf',path)
+                    record={'id':'daily-'+item['arxiv_id'],'arxiv_id':item['arxiv_id'],'title':item['title'],
+                            'authors':'iPaper tests','abstract':'自制合成样例，用于验证 Daily 资产状态与卡片版式。',
+                            'is_daily':True,'daily_date':'2026-09-10','fetch_date':'2026-09-10',
+                            'fetch_category':'cs.AI','subject':'cs.AI','categories':['cs.AI'],
+                            'file_path':str(path) if item['with_pdf'] else None,
+                            'artifact_status':item['artifact_status']}
+                    PaperDAO.save_paper(record)
+                    DailyArxivDAO.save_candidate(record)
+                    with sqlite3.connect(app_module.DB_PATH) as connection:
+                        connection.execute(
+                            "UPDATE daily_arxiv_candidates SET thumbnail_status=?, artifact_error_code=? WHERE owner_id=? AND arxiv_id LIKE ?",
+                            (item.get('thumbnail_status'), 'pdf_http_503' if item['artifact_status']=='failed' else None,
+                             first['id'], item['arxiv_id']+'%'))
+                        connection.commit()
         if os.getenv('IPAPER_BROWSER_REAL_WORKER') != '1':
             # PDF selections now require actual page-text validation. The
             # ordinary UI suite runs the real Worker runner locally on fixtures.

@@ -105,10 +105,16 @@ class PaperStore:
             return self._papers.get((current_user_id(), paper_id))
 
     def get_by_arxiv_id(self, arxiv_id: str) -> Optional[PaperEntry]:
-        """according to arXiv ID Find papers"""
+        """Find a paper by arXiv identity (versions are the same paper)."""
+        from ipaper.arxiv_identity import same_paper
+
         with self._lock:
             for entry in self._papers.values():
-                if entry.owner_id == current_user_id() and entry.paper.arxiv_id == arxiv_id:
+                if entry.owner_id != current_user_id():
+                    continue
+                if entry.paper.arxiv_id == arxiv_id:
+                    return entry
+                if same_paper(entry.paper.arxiv_id, arxiv_id):
                     return entry
             return None
 

@@ -24,6 +24,11 @@ _DAILY_ASSET_COLUMNS = {
     "claimed_at": "TEXT",
     "last_attempt_at": "TEXT",
     "artifact_error_code": "TEXT",
+    # Preview state is independent from the PDF state: a readable PDF with a
+    # failed preview must still be readable, and only the preview needs a retry.
+    "thumbnail_status": "TEXT",
+    "thumbnail_error_code": "TEXT",
+    "requested_stage": "TEXT",
 }
 
 

@@ -129,12 +129,51 @@ class PaperDAO:
         return None
 
     @staticmethod
+    def find_papers_by_identity(arxiv_id, *, daily_only=False):
+        """Owner-scoped rows for one arXiv identity (base id, any revision).
+
+        The Daily queue stores `2609.19915v1` while the paper row stores
+        `2609.19915`; matching by raw string made the asset worker believe the
+        paper did not exist. The predicate is anchored to the base id, so it can
+        never reach a different paper.
+        """
+        from ipaper.arxiv_identity import identity_params, identity_sql, parse_arxiv_identity
+
+        identity = parse_arxiv_identity(arxiv_id)
+        if identity is None:
+            return []
+        predicate, _ = identity_sql("arxiv_id")
+        sql = f"SELECT * FROM papers WHERE owner_id=? AND {predicate}"
+        params = [current_user_id(), *identity_params(arxiv_id)]
+        if daily_only:
+            sql += " AND is_daily = 1"
+        rows = [PaperDAO._row_to_dict(row) for row in get_db().execute(sql, params).fetchall()]
+        return rows
+
+    @staticmethod
     def get_paper_by_arxiv_id(arxiv_id):
-        db = get_db()
-        row = db.execute('SELECT * FROM papers WHERE arxiv_id=? AND owner_id=?', (arxiv_id, current_user_id())).fetchone()
-        if row:
-            return PaperDAO._row_to_dict(row)
-        return None
+        from ipaper.arxiv_identity import best_match
+
+        rows = PaperDAO.find_papers_by_identity(arxiv_id)
+        if not rows:
+            # Unknown formats keep the historical exact-match behaviour.
+            db = get_db()
+            row = db.execute(
+                'SELECT * FROM papers WHERE arxiv_id=? AND owner_id=?',
+                (arxiv_id, current_user_id()),
+            ).fetchone()
+            return PaperDAO._row_to_dict(row) if row else None
+        return best_match(rows, arxiv_id)
+
+    @staticmethod
+    def get_daily_paper_by_identity(arxiv_id):
+        """The Daily row for this identity, used by assets, retries and promotion."""
+        from ipaper.arxiv_identity import best_match
+
+        rows = PaperDAO.find_papers_by_identity(arxiv_id, daily_only=True)
+        if not rows:
+            return None
+        return best_match(rows, arxiv_id)
 
     @staticmethod
     def get_paper_by_path(file_path):
@@ -226,6 +265,11 @@ class PaperDAO:
                 'asset_claimed_at': candidate.get('claimed_at'),
                 'asset_last_attempt_at': candidate.get('last_attempt_at'),
                 'artifact_error_code': candidate.get('artifact_error_code'),
+                # Preview state is tracked separately from the PDF state so the
+                # view can say "PDF 可读、封面待生成" instead of guessing.
+                'thumbnail_status': candidate.get('thumbnail_status'),
+                'thumbnail_error_code': candidate.get('thumbnail_error_code'),
+                'requested_stage': candidate.get('requested_stage'),
             })
         if not category or category == "all":
             return papers

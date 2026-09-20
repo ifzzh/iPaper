@@ -9,7 +9,7 @@
 | 冷启动文献库与 owner 隔离 | `tests/test_workbench_cold_start.py`、`tests/test_workspace_state.py`，候选镜像真实 Flask 冷库检查 | 不依赖先访问旧首页；列表每页50 DOM，API仍返回全量 |
 | 分类、收藏、Reading List、元数据 | `frontend/unified-tests/product.spec.ts`、`tests/test_category_transaction.py` 分类原子保存/虚拟根回归 | 合成用户执行修改；不改写生产论文 |
 | 上传与导入 | `upload.spec.ts`、`import.spec.ts`、`tests/test_import_contract.py`、独立 Document Worker HTTP 验收 | Zotero目标字段、SSE、任务owner、有界后台身份；不放宽归档校验 |
-| Daily、任务、设置与管理员 | `product.spec.ts`、`account.spec.ts`、`task-history.spec.ts`、现有后端鉴权/任务回归 | 操作在统一界面，不嵌入旧页；变更测试使用合成数据，生产不新建付费任务 |
+| Daily、任务、设置与管理员 | `product.spec.ts`、`daily-states.spec.ts`、`account.spec.ts`、`task-history.spec.ts`、`tests/test_daily_asset_identity.py`、`tests/test_daily_asset_processor.py`、`tests/test_daily_scheduler_state.py` | 操作在统一界面，不嵌入旧页；Daily 的 PDF 与封面状态分别显示，缺图可只重生成封面，失败不提前标已读，调度状态可区分线程/启用/本轮/暂停/空闲；变更测试使用合成数据，生产不新建付费任务 |
 | PDF、缩略图、版本与标签 | `session.spec.ts`、`visual.spec.ts`、`position-layout.spec.ts` | 实际 AutoSci 原文/已有译文22页；页码必须与可见页面一致，稳定后保存并在新会话恢复 |
 | 聊天、历史与选区 | `stream.spec.ts`、`product.spec.ts`、`tests/p0_live_chat.py` | 增量UTF-8首行JSON+文本；只进行1次授权真实问答，其余假模型；停止接收不等于服务端取消 |
 | 失败、竞争与安全内容 | `recovery.spec.ts`、流适配单元及恶意载荷回归 | 位置读取失败不覆盖旧值；失效身份清空；Markdown清洗，外部图片不自动加载 |
