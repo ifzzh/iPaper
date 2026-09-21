@@ -105,4 +105,32 @@ def install(application, directory, users, origin, patch):
                 db.execute("UPDATE processing_jobs SET usage_json=? WHERE id=?",
                            (json.dumps(usage), spent["id"]))
         run_as_identity(Identity(user["id"], user["username"], user["role"]), seed_stopped)
+
+        def seed_persisted_answer():
+            # An already-persisted assistant answer, for the "存入本篇笔记" flow.
+            current = service.pipeline(user["id"])
+            history = [
+                {"role": "user", "content": "这篇论文的主要结论是什么？", "timestamp": "1700000000.1"},
+                {"role": "assistant",
+                 "content": "结论：系统在合成验收中覆盖了结构化翻译与问答路径。",
+                 "timestamp": "1700000000.2"},
+            ]
+            with current.store.connection(write=True) as db:
+                db.execute(
+                    "INSERT INTO chats (session_id,paper_id,history,created_at,updated_at,title,owner_id)"
+                    " VALUES (?,?,?,?,?,?,?)",
+                    # Timestamps follow the app's epoch-seconds format; the
+                    # sessions list sorts by float(updated_at).
+                    ("notes-answer-session", "c-4", json.dumps(history, ensure_ascii=False),
+                     "1790000000.1", "1790000000.2", "笔记验收", user["id"]),
+                )
+                db.execute(
+                    "INSERT INTO processing_chat_sources (owner_id,session_id,message_key,sources_json)"
+                    " VALUES (?,?,?,?)",
+                    (user["id"], "notes-answer-session", "1700000000.2",
+                     json.dumps({"S1": "synthetic-artifact-1"})),
+                )
+                db.commit()
+
+        run_as_identity(Identity(user["id"], user["username"], user["role"]), seed_persisted_answer)
     service.start()

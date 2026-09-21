@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { api, Status, Modal } from "./ui";
 import { errorText } from "./api";
+import { ANNOTATION_COLORS, type AnnotationColor } from "./PaperNotes";
 import { PdfSearch, type PageSearch } from "./pdfSearch";
 import type { Match } from "./readingSearch";
 import {
@@ -685,11 +686,21 @@ export function SelectionPopup({
   selection,
   onClose,
   onAsk,
+  onSaveAnnotation,
 }: {
   paperId: string;
   selection: SelectionInput;
   onClose: () => void;
   onAsk: (excerpt: Excerpt) => void;
+  /** Save a persistent highlight/annotation for this selection (optional). */
+  onSaveAnnotation?: (payload: {
+    kind: "highlight" | "note";
+    color: AnnotationColor;
+    comment: string;
+    excerpt: string;
+    anchor: unknown;
+    context: unknown;
+  }) => Promise<boolean>;
 }) {
   const [language, setLanguage] = useState("zh-CN"),
     [preview, setPreview] = useState<any>(null),
@@ -697,6 +708,9 @@ export function SelectionPopup({
     [translation, setTranslation] = useState<any>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const [color, setColor] = useState<AnnotationColor>("violet"),
+    [comment, setComment] = useState(""),
+    [annotationState, setAnnotationState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const request = useRef<AbortController | null>(null),
     alive = useRef(true);
   const payload = {
@@ -810,7 +824,7 @@ export function SelectionPopup({
     job && ["queued", "running", "cancelling"].includes(job.status);
   return (
     <Modal
-      title="划词翻译"
+      title={onSaveAnnotation ? "划词与批注" : "划词翻译"}
       onClose={onClose}
       className="selection-translation-dialog"
     >
@@ -836,6 +850,64 @@ export function SelectionPopup({
       </p>
       <h3>原文</h3>
       <p className="selection-original">{selection.text}</p>
+      {onSaveAnnotation && (
+        <section className="selection-annotation">
+          <div className="selection-annotation-row">
+            <span>高亮颜色</span>
+            {ANNOTATION_COLORS.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                className={
+                  "annotation-swatch color-" + item.value + (color === item.value ? " selected" : "")
+                }
+                aria-label={`使用${item.label}高亮`}
+                aria-pressed={color === item.value}
+                onClick={() => setColor(item.value)}
+              />
+            ))}
+          </div>
+          <label>
+            批注（可留空只保存高亮）
+            <input
+              value={comment}
+              maxLength={2000}
+              placeholder="写下你的理解…"
+              onChange={(e) => setComment(e.target.value)}
+            />
+          </label>
+          <div className="dialog-actions">
+            <button
+              className="primary"
+              disabled={annotationState === "saving" || !(selection as any).anchor}
+              onClick={async () => {
+                setAnnotationState("saving");
+                const ok = await onSaveAnnotation({
+                  kind: comment.trim() ? "note" : "highlight",
+                  color,
+                  comment: comment.trim(),
+                  excerpt: selection.text,
+                  anchor: (selection as any).anchor,
+                  context: (selection as any).context || {},
+                });
+                setAnnotationState(ok ? "saved" : "failed");
+              }}
+            >
+              {annotationState === "saving"
+                ? "正在保存…"
+                : annotationState === "saved"
+                  ? "已保存批注"
+                  : "保存高亮/批注"}
+            </button>
+          </div>
+          {annotationState === "failed" && (
+            <p className="notice error">保存失败：内容仍在输入框中，可重试。</p>
+          )}
+          {!(selection as any).anchor && (
+            <p className="muted">这段文字没有可用的位置信息，只能作为页级记录保存。</p>
+          )}
+        </section>
+      )}
       {translation && (
         <>
           <h3>译文{preview?.cached ? " · 已有缓存" : ""}</h3>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { errorText, isSessionError, request } from "./api";
 import { postChat, readChatStream } from "./chat-stream";
-import { Markdown, Confirm, useResource } from "./ui";
+import { api, Markdown, Confirm, useResource } from "./ui";
 import { AcademicText } from "./MathFormula";
 import {
   MessageSquare,
@@ -97,7 +97,9 @@ export function Chat({
   const [pending, setPending] = useState(""),
     [notice, setNotice] = useState("正在加载聊天历史…");
   const [busy, setBusy] = useState(false),
-    [loading, setLoading] = useState(false);
+    [loading, setLoading] = useState(false),
+    [saveStates, setSaveStates] = useState<Record<number, "saving" | "saved" | "failed">>({}),
+    [saveError, setSaveError] = useState("");
   const epoch = useRef(0),
     controller = useRef<AbortController | null>(null);
   const stream = useRef<AbortController | null>(null),
@@ -494,6 +496,41 @@ export function Chat({
               )}
               onSource={onSource}
             />
+            {m.role === "assistant" && (
+              <div className="message-actions">
+                <button
+                  type="button"
+                  disabled={saveStates[i] === "saving"}
+                  onClick={async () => {
+                    setSaveStates((v) => ({ ...v, [i]: "saving" }));
+                    try {
+                      // Copies the already-persisted answer; no new model call.
+                      await api(
+                        `/api/paper/${encodeURIComponent(paperId)}/reading/note/answers`,
+                        "POST",
+                        { sessionId: id || undefined, messageIndex: i },
+                      );
+                      setSaveStates((v) => ({ ...v, [i]: "saved" }));
+                      // The note panel refetches so the inserted answer is visible
+                      // without a reload (no polling, no model call).
+                      window.dispatchEvent(
+                        new CustomEvent("paper-notes:refresh", { detail: { paperId } }),
+                      );
+                    } catch (e) {
+                      setSaveStates((v) => ({ ...v, [i]: "failed" }));
+                      setSaveError(errorText(e));
+                    }
+                  }}
+                >
+                  {saveStates[i] === "saving"
+                    ? "正在存入…"
+                    : saveStates[i] === "saved"
+                      ? "已存入本篇笔记"
+                      : "存入本篇笔记"}
+                </button>
+                {saveStates[i] === "failed" && <span>保存失败，可重试</span>}
+              </div>
+            )}
             {m.scope && (
               <p className="message-scope">
                 {m.scope.mode === "local" ? "局部问答" : "整篇论文问答"} ·

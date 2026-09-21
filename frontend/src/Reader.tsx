@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -30,6 +31,16 @@ import {
   Search,
 } from "lucide-react";
 import { Chat, type Excerpt } from "./Chat";
+import {
+  AnnotationsPanel,
+  HighlightOverlay,
+  NoteEditor,
+  selectionContext,
+  selectionRects,
+  useAnnotations,
+  type Annotation,
+  type NotePayload,
+} from "./PaperNotes";
 import { api, Modal, Field, Status } from "./ui";
 import { type Paper, errorText } from "./api";
 import {
@@ -69,6 +80,8 @@ function PdfPage({
   searchMatch = null,
   onMatchMissing,
   onRegion,
+  annotations = [],
+  onAnnotationOpen,
 }: {
   doc: PDFDocumentProxy;
   number: number;
@@ -83,6 +96,8 @@ function PdfPage({
   searchMatch?: Match | null;
   onMatchMissing?: () => void;
   onRegion?: (page: number, x: number, y: number) => void;
+  annotations?: Annotation[];
+  onAnnotationOpen?: (annotation: Annotation) => void;
 }) {
   const host = useRef<HTMLDivElement>(null),
     [visible, setVisible] = useState(false),
@@ -248,13 +263,23 @@ function PdfPage({
     };
   }, [doc, number, scale, rotation, visible, JSON.stringify(sourceRegions)]);
   return (
-    <div
-      className={"page-host " + (thumbnail ? "thumbnail-page" : "")}
-      data-page={thumbnail ? undefined : number}
-      ref={host}
-      aria-label={`第 ${number} 页`}
-    >
-      {error && <p role="alert">{error}</p>}
+    <div className="page-wrap">
+      <div
+        className={"page-host " + (thumbnail ? "thumbnail-page" : "")}
+        data-page={thumbnail ? undefined : number}
+        ref={host}
+        aria-label={`第 ${number} 页`}
+      >
+        {error && <p role="alert">{error}</p>}
+      </div>
+      {!thumbnail && (
+        <HighlightOverlay
+          annotations={annotations}
+          page={number}
+          rotation={rotation}
+          onOpen={onAnnotationOpen}
+        />
+      )}
     </div>
   );
 }
@@ -318,6 +343,10 @@ export function PdfReader({
     ),
     [chat, setChat] = useState(!embedded),
     [mobileChat, setMobileChat] = useState(false),
+    [panelTab, setPanelTab] = useState<"chat" | "annotations" | "note">("chat"),
+    [note, setNote] = useState<NotePayload | null>(null),
+    [noteError, setNoteError] = useState(""),
+    [openedAnnotation, setOpenedAnnotation] = useState<Annotation | null>(null),
     [status, setStatus] = useState("正在加载 PDF…"),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
@@ -740,19 +769,64 @@ export function PdfReader({
         focus?.closest("[data-page]")?.getAttribute("data-page"),
       );
       const text = s.toString().trim();
-      if (text)
+      if (text) {
+        // Page-relative line rectangles (rotation independent) plus a short
+        // context, so the annotation can be verified and revisited later.
+        const range = s.rangeCount ? s.getRangeAt(0) : null;
+        const rects = range ? selectionRects(range, rotation) : [];
+        const page = n === endPage ? n : undefined;
         setSelection({
           text,
-          page: n === endPage ? n : undefined,
+          page,
           document: variant,
           title: paper.title,
-        });
+          anchor: rects.length
+            ? { mode: "pdf", page: page || rects[0].page, rects }
+            : page
+              ? { mode: "page", page, rects: [] }
+              : null,
+          context: range ? selectionContext(range) : {},
+        } as any);
+      }
     };
     document.addEventListener("selectionchange", changed);
     return () => document.removeEventListener("selectionchange", changed);
-  }, [paper.id, variant, page]);
+  }, [paper.id, variant, page, rotation]);
+  const notes = useAnnotations(paper.id, identity.identity?.id || null);
+  const loadNote = useCallback(() => {
+    let alive = true;
+    setNoteError("");
+    api<{ note: NotePayload }>(`/api/paper/${encodeURIComponent(paper.id)}/reading/note`)
+      .then((value) => {
+        if (alive) setNote(value.note);
+      })
+      .catch((e) => {
+        if (alive) setNoteError(errorText(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [paper.id]);
+  useEffect(() => {
+    loadNote();
+  }, [loadNote]);
+  useEffect(() => {
+    // The chat can insert an answer into this note; refetch so it shows up
+    // immediately without polling.
+    const refresh = () => loadNote();
+    window.addEventListener("paper-notes:refresh", refresh);
+    return () => window.removeEventListener("paper-notes:refresh", refresh);
+  }, [loadNote]);
   const latestSelection = useRef(selection);
   latestSelection.current = selection;
+  function openSelectionPanel() {
+    // Opens the same single selection surface without preparing a translation,
+    // so a highlight/annotation is one click away.
+    const snapshot = selection,
+      document = identity.identity;
+    if (!snapshot || !document) return;
+    setTranslateSelection({ ...snapshot, documentId: document.id } as any);
+  }
   async function openSelectionTranslation() {
     const snapshot = selection,
       document = identity.identity;
@@ -1019,6 +1093,23 @@ export function PdfReader({
           paperId={paper.id}
           selection={translateSelection}
           onClose={() => setTranslateSelection(null)}
+          onSaveAnnotation={async (payload) => {
+            const document = identity.identity;
+            if (!document) return false;
+            const created = await notes.create({
+              kind: payload.kind,
+              color: payload.color,
+              comment: payload.comment,
+              excerpt: payload.excerpt,
+              documentId: document.id,
+              anchor: payload.anchor || { mode: "page", page: translateSelection.page || 1, rects: [] },
+              context: payload.context,
+            });
+            if (!created) return false;
+            setPanelTab("annotations");
+            setChat(true);
+            return true;
+          }}
           onAsk={(value) => {
             setExcerpt(value);
             setChat(true);
@@ -1135,6 +1226,12 @@ export function PdfReader({
               Array.from({ length: doc.numPages }, (_, i) => (
                 <PdfPage
                   key={`${doc.fingerprints[0]}-${i}`}
+                  annotations={notes.items}
+                  onAnnotationOpen={(annotation) => {
+                    setOpenedAnnotation(annotation);
+                    setPanelTab("annotations");
+                    setChat(true);
+                  }}
                   doc={doc}
                   number={i + 1}
                   scale={scale}
@@ -1168,6 +1265,9 @@ export function PdfReader({
             <div className="selection-actions">
               <Quote size={16} />
               <span>已选择 {Array.from(selection.text).length} 字</span>
+              <button disabled={!identity.identity} onClick={openSelectionPanel}>
+                高亮/批注
+              </button>
               <button
                 disabled={!identity.identity}
                 onClick={() => void openSelectionTranslation()}
@@ -1267,6 +1367,84 @@ export function PdfReader({
               >
                 <X size={17} />
               </button>
+              <div className="reader-panel-tabs" role="tablist" aria-label="阅读工作面">
+                {(
+                  [
+                    ["chat", "问答"],
+                    ["annotations", "批注"],
+                    ["note", "笔记"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    role="tab"
+                    aria-selected={panelTab === value}
+                    className={panelTab === value ? "selected" : ""}
+                    onClick={() => setPanelTab(value)}
+                  >
+                    {label}
+                    {value === "annotations" && notes.items.length > 0 && (
+                      <small>{notes.items.length}</small>
+                    )}
+                  </button>
+                ))}
+              </div>
+              {panelTab === "annotations" && (
+                <AnnotationsPanel
+                  annotations={notes.items}
+                  loading={notes.loading}
+                  error={notes.error}
+                  note={note}
+                  onRefresh={() => void notes.refresh()}
+                  onNote={setNote}
+                  onError={setNoteError}
+                  onOpen={(annotation) => {
+                    setOpenedAnnotation(annotation);
+                    if (annotation.canNavigate && annotation.anchor?.mode === "pdf") {
+                      jump((annotation.anchor as any).page);
+                    }
+                  }}
+                  onDelete={(annotation) => void notes.remove(annotation.id, annotation.revision)}
+                  onRestore={(annotation) => void notes.restore(annotation.id, annotation.revision)}
+                />
+              )}
+              {panelTab === "note" && (
+                <div className="reader-note-panel">
+                  {noteError && <p className="notice error">{noteError}</p>}
+                  <NoteEditor
+                    paperId={paper.id}
+                    note={note}
+                    onNote={setNote}
+                    onError={setNoteError}
+                    onResolveConflict={async (conflictId, choice) => {
+                      const value = await api<{ note: NotePayload }>(
+                        `/api/paper/${encodeURIComponent(paper.id)}/reading/note/conflicts/${conflictId}`,
+                        "POST",
+                        { choice },
+                      );
+                      setNote(value.note);
+                    }}
+                    onInsertExcerpt={
+                      openedAnnotation
+                        ? async () => {
+                            if (!note) return;
+                            try {
+                              const value = await api<{ note: NotePayload }>(
+                                `/api/paper/${encodeURIComponent(paper.id)}/reading/note/excerpts`,
+                                "POST",
+                                { annotationId: openedAnnotation.id, revision: note.revision },
+                              );
+                              setNote(value.note);
+                            } catch (e) {
+                              setNoteError(errorText(e));
+                            }
+                          }
+                        : undefined
+                    }
+                  />
+                </div>
+              )}
+              {panelTab === "chat" && (
               <Chat
                 key={paper.id}
                 paperId={paper.id}
@@ -1284,6 +1462,33 @@ export function PdfReader({
                 onClearExcerpt={() => setExcerpt(null)}
                 drafts={drafts}
               />
+              )}
+              {openedAnnotation && panelTab === "annotations" && (
+                <div className="annotation-detail">
+                  <p>
+                    <strong>{openedAnnotation.excerpt || "（页级记录）"}</strong>
+                  </p>
+                  {openedAnnotation.comment && <p>{openedAnnotation.comment}</p>}
+                  <p className="muted">
+                    {openedAnnotation.canNavigate
+                      ? "已定位到来源；缩放、旋转后位置仍然对应。"
+                      : openedAnnotation.notice ||
+                        "来源不可用或已变化，不会跳到别的内容。"}
+                  </p>
+                  {openedAnnotation.anchor?.mode === "structure" && (
+                    <button
+                      onClick={() => {
+                        location.assign(
+                          `/?view=reader&paper=${encodeURIComponent(paper.id)}&content=structure`,
+                        );
+                      }}
+                    >
+                      在结构阅读中打开
+                    </button>
+                  )}
+                  <button onClick={() => setOpenedAnnotation(null)}>关闭详情</button>
+                </div>
+              )}
             </section>
           </>
         )}

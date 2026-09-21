@@ -443,6 +443,7 @@ class PaperNotes:
             "markdown": updated["markdown"],
             "revision": updated["revision"],
             "updatedAt": updated["updated_at"],
+            "exists": True,
         }
 
     def resolve_conflict(self, paper_id, conflict_id, data):

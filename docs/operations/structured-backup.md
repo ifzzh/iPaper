@@ -121,3 +121,7 @@ sudo -n env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
 ## 1.7.0 主题分类
 
 主题节点、定义绑定、论文关联、分支排除、删除标记、合并重定向、旧分类映射、批次/检查点、幂等回执、撤销记录及导航偏好均包含在完整 SQLite 备份中。无需移动或复制论文产物。回退前停止新主题任务；使用本轮持久备份中的 rollback.py 恢复 Web1.6.0 镜像和配置，保留当前数据库和新增表。再升级对账旧功能新增/修改/删除，不用旧快照覆盖新关系。`scripts/validate_topics_rollback.py` 使用真实1.6镜像及隔离数据库验证往返。
+
+## 阅读笔记相关的表
+
+`reading_annotations`、`reading_notes`、`reading_note_entries`、`reading_note_conflicts`（Web 1.13.0 起）位于同一个 SQLite 数据库文件中，因此现有的停写备份、一致性校验与回退流程自动覆盖；它们不引用任何外部附件，也不需要单独的目录。

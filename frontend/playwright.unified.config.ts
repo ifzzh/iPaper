@@ -5,6 +5,7 @@ export default defineConfig({
   testDir: "./unified-tests",
   testIgnore: [
     "daily-states.spec.ts",
+    "notes.spec.ts",
     "translation-budget.spec.ts",
     "topics-loading.spec.ts",
     "list-loading.spec.ts",

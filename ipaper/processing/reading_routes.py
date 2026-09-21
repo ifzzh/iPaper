@@ -2,6 +2,7 @@
 
 import os
 import re
+from urllib.parse import quote
 from flask import Response, jsonify, request
 from itsdangerous import URLSafeTimedSerializer
 from .common import ProcessingError
@@ -79,13 +80,17 @@ def attach_reading_routes(bp, service, body, public_job):
     def export_reading_note(paper_id):
         include = request.args.get("annotations", "1") != "0"
         text, title, _revision = notes().export_markdown(paper_id, include_annotations=include)
-        safe = re.sub(r"[^\w\u4e00-\u9fff.-]+", "-", title).strip("-")[:60] or "notes"
+        # ASCII-safe filename plus RFC 5987 UTF-8 form; never put raw non-Latin-1
+        # bytes in a plain header value.
+        safe = re.sub(r"[^A-Za-z0-9.-]+", "-", title).strip("-")[:60] or "notes"
+        encoded = quote(f"note-{title[:60] or 'notes'}.md", safe="")
         return Response(
             text,
             mimetype="text/markdown; charset=utf-8",
             headers={
-                "Content-Disposition": f"attachment; filename=note-{safe}.md",
+                "Content-Disposition": f"attachment; filename=note-{safe}.md; filename*=UTF-8''{encoded}",
                 "Cache-Control": "private, no-store",
+                "Content-Length": str(len(text.encode("utf-8"))),
             },
         )
 

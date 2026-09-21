@@ -345,3 +345,6 @@
     grid-template-columns: 1fr;
   }
 }
+
+.block-language { position: relative; }
+.structured-marks-layer { z-index: 1; }

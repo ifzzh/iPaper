@@ -41,6 +41,16 @@ import {
   type StructureHit,
 } from "./ReadingTools";
 import { MediaBoundary } from "./MediaViewer";
+import {
+  ANNOTATION_COLORS,
+  StructuredMarks,
+  AnnotationsPanel,
+  NoteEditor,
+  useAnnotations,
+  type Annotation,
+  type AnnotationColor,
+  type NotePayload,
+} from "./PaperNotes";
 
 type Cell = { text: string; rowspan: number; colspan: number; header: boolean };
 type Content = { text: string; caption: string; table: Cell[][] | null };
@@ -466,6 +476,7 @@ function BlockContent({
   translated,
   onSelection,
   onSource,
+  annotations = [],
 }: {
   content: Content;
   block: Block;
@@ -480,7 +491,9 @@ function BlockContent({
     text: string,
     translated: boolean,
   ) => void;
+  annotations?: Annotation[];
 }) {
+  const section = useRef<HTMLElement>(null);
   function select(e: React.SyntheticEvent<HTMLElement>) {
     const selection = window.getSelection();
     if (!selection?.rangeCount || selection.isCollapsed) return;
@@ -514,7 +527,11 @@ function BlockContent({
   }
   return (
     <MediaBoundary onSource={onSource}>
-      <section className="block-language">
+      <section
+        className="block-language"
+        data-language={translated ? "translated" : "original"}
+        ref={section}
+      >
         <span className="block-language-label">{label}</span>
         {block.imageUrl && !translated && (
           <img
@@ -611,6 +628,12 @@ function BlockContent({
         {block.type === "table" && !content.table && (
           <p className="muted">此表格仅有图片，未识别出可翻译的单元格正文。</p>
         )}
+        <StructuredMarks
+          host={section}
+          blockId={block.id}
+          translated={translated}
+          annotations={annotations}
+        />
       </section>
     </MediaBoundary>
   );
@@ -653,6 +676,13 @@ function StructureContent(
     restorePoint = useRef<{ blockId: string; offset: number } | null>(null),
     [excerpt, setExcerpt] = useState<Excerpt | null>(null),
     [selection, setSelection] = useState<any>(null),
+    [panelTab, setPanelTab] = useState<"chat" | "annotations" | "note">("chat"),
+    [note, setNote] = useState<NotePayload | null>(null),
+    [noteError, setNoteError] = useState(""),
+    [openedAnnotation, setOpenedAnnotation] = useState<Annotation | null>(null),
+    [annotationState, setAnnotationState] = useState<"idle" | "saving" | "saved" | "failed">("idle"),
+    [annotationColor, setAnnotationColor] = useState<AnnotationColor>("violet"),
+    [annotationComment, setAnnotationComment] = useState(""),
     [chat, setChat] = useState(!matchMedia("(max-width:640px)").matches),
     [session, setSession] = useState(""),
     [retryBlock, setRetryBlock] = useState<string | null>(null);
@@ -1064,6 +1094,43 @@ function StructureContent(
       if (alive.current) setError(errorText(e));
     }
   }
+  const notes = useAnnotations(paper.id, result?.id || null);
+  const loadNote = useCallback(() => {
+    let alive = true;
+    void api<{ note: NotePayload }>(`/api/paper/${encodeURIComponent(paper.id)}/reading/note`)
+      .then((value) => {
+        if (alive) setNote(value.note);
+      })
+      .catch((e) => {
+        if (alive) setNoteError(errorText(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [paper.id]);
+  useEffect(() => {
+    loadNote();
+  }, [loadNote]);
+  useEffect(() => {
+    // The chat can insert an answer into this note; refetch so it shows up
+    // immediately without polling.
+    const refresh = () => loadNote();
+    window.addEventListener("paper-notes:refresh", refresh);
+    return () => window.removeEventListener("paper-notes:refresh", refresh);
+  }, [loadNote]);
+  const structuredAnchor = (value: any) =>
+    value && value.block
+      ? {
+          mode: "structure" as const,
+          blockId: value.block.id,
+          field: value.field || "text",
+          start: value.start,
+          end: value.end,
+          ...(value.translated && value.block.translation?.revision
+            ? { translationRevision: value.block.translation.revision }
+            : {}),
+        }
+      : null;
   return (
     <>
       <div className="structure-subtoolbar">
@@ -1220,6 +1287,7 @@ function StructureContent(
                 <div className={"block-pair " + display}>
                   {display !== "translated" && (
                     <BlockContent
+                      annotations={notes.items}
                       content={block}
                       block={block}
                       translated={false}
@@ -1251,6 +1319,7 @@ function StructureContent(
                   {display !== "original" &&
                     (block.translation?.content ? (
                       <BlockContent
+                        annotations={notes.items}
                         content={block.translation.content}
                         block={block}
                         translated
@@ -1320,6 +1389,63 @@ function StructureContent(
               <button className="primary" onClick={() => void ask()}>
                 带来源提问
               </button>
+              {structuredAnchor(selection) && (
+                <>
+                  <span className="selection-color-row">
+                    {ANNOTATION_COLORS.map((item) => (
+                      <button
+                        key={item.value}
+                        type="button"
+                        className={
+                          "annotation-swatch color-" + item.value + (annotationColor === item.value ? " selected" : "")
+                        }
+                        aria-label={`使用${item.label}高亮`}
+                        aria-pressed={annotationColor === item.value}
+                        onClick={() => setAnnotationColor(item.value)}
+                      />
+                    ))}
+                  </span>
+                  <input
+                    className="selection-comment"
+                    value={annotationComment}
+                    maxLength={2000}
+                    placeholder="批注（可留空）"
+                    aria-label="批注内容"
+                    onChange={(e) => setAnnotationComment(e.target.value)}
+                  />
+                  <button
+                    disabled={annotationState === "saving"}
+                    onClick={async () => {
+                      const anchor = structuredAnchor(selection);
+                      if (!anchor || !result) return;
+                      setAnnotationState("saving");
+                      const created = await notes.create({
+                        kind: annotationComment.trim() ? "note" : "highlight",
+                        color: annotationColor,
+                        comment: annotationComment.trim(),
+                        excerpt: selection.text,
+                        documentId: result.documentId,
+                        resultId: result.id,
+                        anchor,
+                        context: {},
+                      });
+                      setAnnotationState(created ? "saved" : "failed");
+                      if (created) {
+                        setAnnotationComment("");
+                        setPanelTab("annotations");
+                        setChat(true);
+                      }
+                    }}
+                  >
+                    {annotationState === "saving"
+                      ? "正在保存…"
+                      : annotationState === "saved"
+                        ? "已保存"
+                        : "保存高亮/批注"}
+                  </button>
+                  {annotationState === "failed" && <span role="alert">保存失败，可重试</span>}
+                </>
+              )}
               <button aria-label="清除选区" onClick={() => setSelection(null)}>
                 <X size={16} />
               </button>
@@ -1372,7 +1498,7 @@ function StructureContent(
             />
             <aside className="structure-chat">
               <div className="panel-heading">
-                <h2>论文问答</h2>
+                <h2>阅读工作面</h2>
                 <button
                   onClick={() => setChat(false)}
                   aria-label="返回结构阅读"
@@ -1380,6 +1506,84 @@ function StructureContent(
                   <X size={16} />
                 </button>
               </div>
+              <div className="reader-panel-tabs" role="tablist" aria-label="阅读工作面">
+                {(
+                  [
+                    ["chat", "问答"],
+                    ["annotations", "批注"],
+                    ["note", "笔记"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    role="tab"
+                    aria-selected={panelTab === value}
+                    className={panelTab === value ? "selected" : ""}
+                    onClick={() => setPanelTab(value)}
+                  >
+                    {label}
+                    {value === "annotations" && notes.items.length > 0 && (
+                      <small>{notes.items.length}</small>
+                    )}
+                  </button>
+                ))}
+              </div>
+              {panelTab === "annotations" && (
+                <AnnotationsPanel
+                  annotations={notes.items}
+                  loading={notes.loading}
+                  error={notes.error}
+                  note={note}
+                  onRefresh={() => void notes.refresh()}
+                  onNote={setNote}
+                  onError={setNoteError}
+                  onOpen={(annotation) => {
+                    setOpenedAnnotation(annotation);
+                    if (annotation.canNavigate && annotation.anchor?.mode === "structure") {
+                      void jumpBlock((annotation.anchor as any).blockId);
+                    }
+                  }}
+                  onDelete={(annotation) => void notes.remove(annotation.id, annotation.revision)}
+                  onRestore={(annotation) => void notes.restore(annotation.id, annotation.revision)}
+                />
+              )}
+              {panelTab === "note" && (
+                <div className="reader-note-panel">
+                  {noteError && <p className="notice error">{noteError}</p>}
+                  <NoteEditor
+                    paperId={paper.id}
+                    note={note}
+                    onNote={setNote}
+                    onError={setNoteError}
+                    onResolveConflict={async (conflictId, choice) => {
+                      const value = await api<{ note: NotePayload }>(
+                        `/api/paper/${encodeURIComponent(paper.id)}/reading/note/conflicts/${conflictId}`,
+                        "POST",
+                        { choice },
+                      );
+                      setNote(value.note);
+                    }}
+                    onInsertExcerpt={
+                      openedAnnotation
+                        ? async () => {
+                            if (!note) return;
+                            try {
+                              const value = await api<{ note: NotePayload }>(
+                                `/api/paper/${encodeURIComponent(paper.id)}/reading/note/excerpts`,
+                                "POST",
+                                { annotationId: openedAnnotation.id, revision: note.revision },
+                              );
+                              setNote(value.note);
+                            } catch (e) {
+                              setNoteError(errorText(e));
+                            }
+                          }
+                        : undefined
+                    }
+                  />
+                </div>
+              )}
+              {panelTab === "chat" && (
               <Chat
                 paperId={paper.id}
                 onExpired={props.onExpired}
@@ -1411,6 +1615,7 @@ function StructureContent(
                   return source.text.trim() ? [source.id] : [];
                 }}
               />
+              )}
             </aside>
           </>
         )}
