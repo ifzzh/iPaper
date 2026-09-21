@@ -90,3 +90,6 @@ SCHEMA += UNDERSTANDING_SCHEMA
 
 from .reading_schema import SCHEMA as READING_SCHEMA
 SCHEMA += READING_SCHEMA
+
+from .notes_schema import SCHEMA as NOTES_SCHEMA
+SCHEMA += NOTES_SCHEMA
