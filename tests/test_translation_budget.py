@@ -27,6 +27,27 @@ from tests.test_processing_pipeline import FakeCloud, FakeModel, pipeline  # noq
 from tests.test_processing_store import OTHER, OWNER, store  # noqa: F401 (fixture)
 
 
+class ReservingModel(FakeModel):
+    """A fake supplier that really reserves, like the production path does."""
+
+    calls = 0
+
+    def __init__(self, *args):
+        super().__init__(*args)
+
+    def translate(self, units, language, jobs, job_id):
+        from ipaper.processing.translation import request_payload as payload
+
+        _, inputs, outputs = payload(units, language)
+        attempt = jobs.reserve_attempt(
+            job_id, "model", units[0]["id"], input_tokens=inputs, output_tokens=outputs
+        )
+        answer = super().translate(units, language, jobs, job_id)
+        jobs.finish_attempt(job_id, attempt, "completed", {"inputTokens": 11, "outputTokens": 22})
+        ReservingModel.calls += 1
+        return answer
+
+
 def publish_scale_structure(store, pipeline, tmp_path, *, translatable=245, empty=26, pages=15):
     """Publish a synthetic parse of the screenshot's magnitude through the real store.
 
@@ -163,14 +184,20 @@ def test_screenshot_magnitude_passes_the_new_default_and_was_blocked_at_200(stor
     assert preview_response["limits"] == MAX_TRANSLATION_BUDGET
     assert pipeline.jobs.list() == []
 
-    # Submitting under the same envelope is admitted and runs a bounded fake.
+    # Submitting under the same envelope is admitted and runs a bounded fake
+    # that reserves like production, so a zero-usage run cannot pass this.
+    ReservingModel.calls = 0
+    pipeline.model_factory = ReservingModel
     job, created = pipeline.create("paper", {**request, "budget": {"requests": 260}})
     assert created
     assert json.loads(job["budget_json"])["requests"] == 260
     pipeline.run(job["id"])
     outcome = pipeline.jobs.get(job["id"])
     assert outcome["status"] == "completed", outcome["error"]
-    assert json.loads(outcome["usage_json"])["requests"] <= 245
+    reserved = json.loads(outcome["usage_json"])["requests"]
+    assert reserved == ReservingModel.calls
+    assert 200 <= reserved <= 245, reserved
+    assert json.loads(outcome["usage_json"])["inputTokens"] > 0
 
 
 def test_overage_details_name_the_exact_dimension(store, pipeline, tmp_path):  # noqa: F811
@@ -270,30 +297,50 @@ def test_resume_with_a_larger_budget_keeps_usage_and_is_idempotent(store, pipeli
     assert final["status"] == "completed", final["error"]
 
 
-def test_resume_rejects_below_usage_and_above_the_ceiling(store, pipeline, monkeypatch):  # noqa: F811
-    job, outcome = stopped_job_with_usage(pipeline, store, monkeypatch)
+def test_resume_rejects_below_usage_and_above_the_ceiling(store, pipeline, tmp_path, monkeypatch):  # noqa: F811
+    # Two translatable blocks so the job really consumes two requests: the
+    # below-usage branch is exercised instead of being skipped.
+    preview, _parsed = publish_scale_structure(store, pipeline, tmp_path, translatable=2, empty=0, pages=1)
+    job, _ = pipeline.create(
+        "paper",
+        {"preflightId": preview["preflightId"], "kind": "parse_translate", "budget": {"requests": 2}},
+    )
+    ReservingModel.calls = 0
+    pipeline.model_factory = ReservingModel
+    original_finish = store.finish_translation
+    state = {"completed": 0}
+
+    def stop_after_two(*args, **kwargs):
+        # Let both blocks consume their reservation, then stop the job.
+        if not kwargs.get("error"):
+            state["completed"] += 1
+            # The second block has already reserved; stopping here leaves the
+            # job failed with two requests used.
+            if state["completed"] >= 2:
+                raise ProcessingError("processing_budget_exceeded")
+        return original_finish(*args, **kwargs)
+
+    monkeypatch.setattr(store, "finish_translation", stop_after_two)
+    pipeline.run(job["id"])
+    outcome = pipeline.jobs.get(job["id"])
     usage = json.loads(outcome["usage_json"])
-    # Zero and non-positive values are invalid, not clamped.
+    assert usage["requests"] == 2, usage
+
     with pytest.raises(ProcessingError) as raised:
         pipeline.resume(job["id"], {"requests": 0})
     assert raised.value.code == "invalid_budget"
-    # A whole-task total below what the task already used is refused with detail.
-    if usage["requests"] >= 2:
-        with pytest.raises(ProcessingError) as raised:
-            pipeline.resume(job["id"], {"requests": usage["requests"] - 1})
-        assert raised.value.code == "budget_below_usage"
-        assert raised.value.details["overage"]["requests"]["used"] == usage["requests"]
-    # Equal to the amount already used is accepted (nothing below it is).
-    if usage["requests"] >= 1:
-        pipeline.resume(job["id"], {"requests": usage["requests"]})
-        assert json.loads(pipeline.jobs.get(job["id"])["budget_json"])["requests"] == usage["requests"]
-        pipeline.jobs.cancel(job["id"])
+    with pytest.raises(ProcessingError) as raised:
+        pipeline.resume(job["id"], {"requests": usage["requests"] - 1})
+    assert raised.value.code == "budget_below_usage"
+    assert raised.value.details["overage"]["requests"]["used"] == usage["requests"]
     with pytest.raises(ProcessingError) as raised:
         pipeline.resume(job["id"], {"requests": 2_001})
     assert raised.value.code == "invalid_budget"
-    # Every rejected attempt left the job exactly as it was (or queued when the
-    # equality case above legitimately resumed it, then cancelled by the test).
-    assert pipeline.jobs.get(job["id"])["status"] in {"failed", "queued", "cancelled"}
+    assert pipeline.jobs.get(job["id"])["status"] == "failed"
+    # Equal to the amount already used is accepted (nothing below it is).
+    pipeline.resume(job["id"], {"requests": usage["requests"]})
+    assert json.loads(pipeline.jobs.get(job["id"])["budget_json"])["requests"] == usage["requests"]
+    pipeline.jobs.cancel(job["id"])
 
 
 def test_resume_without_a_budget_keeps_the_saved_envelope(store, pipeline, monkeypatch):  # noqa: F811
@@ -353,3 +400,194 @@ def test_other_owner_cannot_plan_or_resume_the_job(store, pipeline, monkeypatch)
         with pytest.raises(ProcessingError):
             operation()
     assert json.loads(pipeline.jobs.get(job["id"])["budget_json"])["requests"] == 2
+
+# --- regressions ported from the independent 1.12.0 review -----------------
+
+
+def test_default_admission_respects_a_lower_deployment_ceiling(store, pipeline, tmp_path, monkeypatch):  # noqa: F811
+    import ipaper.processing.jobs as module
+
+    monkeypatch.setattr(
+        module, "MAX_TRANSLATION_BUDGET", {**module.MAX_TRANSLATION_BUDGET, "requests": 100}
+    )
+    preview, parsed = publish_scale_structure(store, pipeline, tmp_path, translatable=245, empty=26)
+    data = {"kind": "parse_translate", "preflightId": preview["preflightId"], "parseResultId": parsed}
+    scope = pipeline.create("paper", data, preview=True)
+    # The effective default is the lowered ceiling, never above it.
+    assert scope["limits"]["requests"] == 100
+    assert scope["budget"]["requests"] == 100
+    assert scope["defaultCappedByCeiling"] is True
+    # 245 base requests cannot pass a 100 request ceiling, and the error names it.
+    with pytest.raises(ProcessingError) as raised:
+        pipeline.create("paper", data)
+    assert raised.value.code == "processing_scope_exceeds_budget"
+    assert raised.value.details["overage"]["requests"]["limit"] == 100
+    # A scope inside the ceiling is admitted and stores a budget within it.
+    small, _parsed2 = publish_scale_structure(store, pipeline, tmp_path, translatable=40, empty=0)
+    job, _ = pipeline.create(
+        "paper", {"kind": "parse_translate", "preflightId": small["preflightId"], "parseResultId": _parsed2}
+    )
+    assert json.loads(job["budget_json"])["requests"] <= 100
+
+
+def test_zero_and_partial_budgets_are_validated_against_the_ceiling(store):
+    import ipaper.processing.jobs as module
+
+    ceiling = dict(module.MAX_TRANSLATION_BUDGET)
+    # Every composition path: default, empty dict and partial dict.
+    for value in (None, {}, {"requests": 200}):
+        result = ProcessingJobs.budget(value, kind="translate")
+        assert all(result[key] <= ceiling[key] for key in ("requests", "inputTokens", "outputTokens", "seconds"))
+
+
+def test_exhausted_time_is_not_sufficient_and_cannot_be_queued(store, pipeline, tmp_path):  # noqa: F811
+    # Two blocks, the second interrupted during its model request: the job really
+    # has pending work (no checkpoint exists for it).
+    preview, parsed = publish_scale_structure(store, pipeline, tmp_path, translatable=2, empty=0, pages=1)
+
+    class StopOnSecond(ReservingModel):
+        calls = 0
+
+        def translate(self, units, language, jobs, job_id):
+            StopOnSecond.calls += 1
+            if StopOnSecond.calls >= 2:
+                raise ProcessingError("model_result_unknown")
+            return super().translate(units, language, jobs, job_id)
+
+    pipeline.model_factory = StopOnSecond
+    job, _ = pipeline.create(
+        "paper",
+        {"kind": "parse_translate", "preflightId": preview["preflightId"], "parseResultId": parsed,
+         "budget": {"requests": 2}},
+    )
+    pipeline.run(job["id"])
+    saved = pipeline.jobs.get(job["id"])
+    assert saved["status"] == "interrupted", saved["error"]
+    pending = pipeline.resume_plan(job["id"])
+    assert pending["remainingWork"] is True
+    assert pending["estimate"]["requests"] == 1
+
+    budget = json.loads(saved["budget_json"])
+    usage = json.loads(saved["usage_json"])
+    usage["seconds"] = budget["seconds"]
+    with store.connection(write=True) as db:
+        db.execute(
+            "UPDATE processing_jobs SET status='interrupted',error='processing_time_budget',usage_json=? WHERE id=?",
+            (json.dumps(usage), job["id"]),
+        )
+    plan = pipeline.resume_plan(job["id"])
+    assert plan["sufficient"] is False
+    assert plan["time"]["exhausted"] is True
+    assert plan["overage"]["seconds"]["required"] == usage["seconds"] + 1
+    # Raising only the request allowance must not queue a task that times out again.
+    with pytest.raises(ProcessingError) as raised:
+        pipeline.resume(job["id"], {"requests": budget["requests"] + 1})
+    assert raised.value.code == "budget_time_exhausted"
+    assert raised.value.details["minimum"] == usage["seconds"] + 1
+    assert pipeline.jobs.get(job["id"])["status"] == "interrupted"
+    # Extending the累计 hours is enough on its own.
+    pipeline.resume(job["id"], {"seconds": budget["seconds"] + 3600})
+    resumed = pipeline.jobs.get(job["id"])
+    assert resumed["status"] == "queued"
+    assert json.loads(resumed["budget_json"])["seconds"] == budget["seconds"] + 3600
+    assert json.loads(resumed["usage_json"])["seconds"] == usage["seconds"]
+    pipeline.jobs.cancel(job["id"])
+
+
+def test_retranslate_resume_plan_matches_the_executor_estimate(store, pipeline):  # noqa: F811
+    preview = pipeline.preflight("paper")
+    original, _ = pipeline.create("paper", {"preflightId": preview["preflightId"]})
+    pipeline.run(original["id"])
+    original = pipeline.jobs.get(original["id"])
+    translated_id = original["result_id"]
+    parse_id = store.result(translated_id)["parse_id"]
+    block = store.blocks(translated_id)[0]
+    job, _ = pipeline.create(
+        "paper",
+        {"kind": "retranslate", "preflightId": preview["preflightId"], "parseResultId": parse_id,
+         "translationResultId": translated_id, "blockIds": [block["id"]]},
+    )
+    pipeline.jobs.cancel(job["id"])
+    plan = pipeline.resume_plan(job["id"])
+    execution = pipeline.estimate(
+        parse_id, result_id=translated_id, block_ids=[block["id"]], force=True,
+        checkpoint_root=store.artifact_directory(job["id"]),
+        request=json.loads(job["request_json"]),
+    )
+    # The earlier successful translation is not "already done" for an explicit
+    # retranslation, so the plan must not hide the request it will spend.
+    assert plan["estimate"]["requests"] == execution["requests"] == 1
+
+
+@pytest.mark.parametrize(
+    "response, expected",
+    [
+        ({"inputTokens": 12, "outputTokens": None}, {"input": True, "output": False}),
+        ({"inputTokens": None, "outputTokens": 7}, {"input": False, "output": True}),
+        ({"inputTokens": None, "outputTokens": None}, {"input": False, "output": False}),
+        ({"inputTokens": "12", "outputTokens": 7.5}, {"input": False, "output": False}),
+        ({"inputTokens": 12, "outputTokens": 7}, {"input": True, "output": True}),
+    ],
+)
+def test_actual_usage_completeness_is_per_dimension(store, response, expected):
+    jobs = ProcessingJobs(store)
+    job, _ = jobs.create("paper", "translate", {})
+    jobs.claim(job["id"])
+    attempt = jobs.reserve_attempt(job["id"], "model", "unit", input_tokens=100, output_tokens=200)
+    jobs.finish_attempt(job["id"], attempt, "completed", response)
+    actual = jobs.actual_usage(job["id"])
+    assert actual["inputComplete"] is expected["input"]
+    assert actual["outputComplete"] is expected["output"]
+    assert actual["complete"] is (expected["input"] and expected["output"])
+    assert actual["inputMissingAttempts"] == (0 if expected["input"] else 1)
+    assert actual["outputMissingAttempts"] == (0 if expected["output"] else 1)
+    # Reserved counts are untouched by missing supplier data.
+    reserved = json.loads(jobs.get(job["id"])["usage_json"])
+    assert reserved["inputTokens"] == 100 and reserved["outputTokens"] == 200
+
+
+def test_actual_usage_without_requests_is_not_claimed_complete(store):
+    jobs = ProcessingJobs(store)
+    job, _ = jobs.create("paper", "translate", {})
+    actual = jobs.actual_usage(job["id"])
+    assert actual["requests"] == 0
+    assert actual["complete"] is False
+    assert actual["inputComplete"] is False and actual["outputComplete"] is False
+
+
+def test_in_flight_attempts_count_as_missing_usage(store):
+    jobs = ProcessingJobs(store)
+    job, _ = jobs.create("paper", "translate", {})
+    jobs.claim(job["id"])
+    jobs.reserve_attempt(job["id"], "model", "unit", input_tokens=100, output_tokens=200)
+    actual = jobs.actual_usage(job["id"])
+    assert actual["requests"] == 1
+    assert actual["complete"] is False
+    assert actual["inputMissingAttempts"] == 1 and actual["outputMissingAttempts"] == 1
+
+
+def test_exhausted_clock_can_still_finish_publishing_saved_work(store, pipeline):  # noqa: F811
+    """No model work left: an exhausted clock must not fail the continuation."""
+    preview = pipeline.preflight("paper")
+    job, _ = pipeline.create("paper", {"kind": "parse_translate", "preflightId": preview["preflightId"]})
+    pipeline.run(job["id"])
+    saved = pipeline.jobs.get(job["id"])
+    assert saved["status"] == "completed"
+    budget = json.loads(saved["budget_json"])
+    usage = json.loads(saved["usage_json"])
+    usage["seconds"] = budget["seconds"]
+    with store.connection(write=True) as db:
+        db.execute(
+            "UPDATE processing_jobs SET status='interrupted',error='processing_time_budget',usage_json=? WHERE id=?",
+            (json.dumps(usage), job["id"]),
+        )
+    plan = pipeline.resume_plan(job["id"])
+    assert plan["remainingWork"] is False
+    assert plan["sufficient"] is True  # nothing left to request
+    pipeline.resume(job["id"])
+    pipeline.run(job["id"])
+    outcome = pipeline.jobs.get(job["id"])
+    # Previously this failed instantly with processing_time_budget even though no
+    # model request was needed.
+    assert outcome["status"] == "completed", outcome["error"]
+    assert outcome["error"] is None

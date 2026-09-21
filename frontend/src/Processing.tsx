@@ -126,7 +126,8 @@ export function TranslationDialog({
     [estimating, setEstimating] = useState(false),
     [scopeError, setScopeError] = useState(""),
     [budgetDraft, setBudgetDraft] = useState<any>(null),
-    [budgetOpen, setBudgetOpen] = useState(false);
+    [budgetOpen, setBudgetOpen] = useState(false),
+    [budgetNotice, setBudgetNotice] = useState("");
   const abort = useRef<AbortController | null>(null);
   // Defaults and ceilings come from the API for this job kind, so the page
   // never keeps its own copy of the numbers.
@@ -163,6 +164,36 @@ export function TranslationDialog({
     const next = { ...(effectiveBudget || scope.budget) };
     for (const detail of Object.values<any>(scope.overage))
       next[detail.dimension] = detail.required;
+    setBudgetDraft(next);
+    setBudgetOpen(true);
+  }
+  // An explicit, user-chosen envelope that also covers the one allowed 429
+  // retry for every base request. It is never applied automatically, and it
+  // covers requests, input and output together (not just a doubled request count).
+  function applyRetryAllowance() {
+    const estimate = scope?.estimate;
+    if (!estimate?.requestsWithRetryAllowance) {
+      setBudgetNotice("当前范围还没有可用于重试余量的估算。");
+      return;
+    }
+    const next = {
+      ...(effectiveBudget || scope.budget),
+      requests: estimate.requestsWithRetryAllowance,
+      inputTokens: estimate.worstCaseInputTokens,
+      outputTokens: estimate.worstCaseOutputTokens,
+    };
+    if (
+      budgetLimits &&
+      (next.requests > budgetLimits.requests ||
+        next.inputTokens > budgetLimits.inputTokens ||
+        next.outputTokens > budgetLimits.outputTokens)
+    ) {
+      setBudgetNotice(
+        "含 429 重试余量的额度超过本次部署上限，请手动填写或让管理员调整上限。",
+      );
+      return;
+    }
+    setBudgetNotice("");
     setBudgetDraft(next);
     setBudgetOpen(true);
   }
@@ -476,6 +507,16 @@ export function TranslationDialog({
                         <p className="muted">
                           额度是整个任务的累计总额；续跑时不会清零已用部分，也不能低于已用量。
                         </p>
+                        {scope?.estimate?.requestsWithRetryAllowance && (
+                          <button type="button" onClick={applyRetryAllowance}>
+                            含 429 重试余量（请求 {scope.estimate.requestsWithRetryAllowance}、输入{" "}
+                            {scope.estimate.worstCaseInputTokens.toLocaleString()}、输出{" "}
+                            {scope.estimate.worstCaseOutputTokens.toLocaleString()}）
+                          </button>
+                        )}
+                        {budgetNotice && (
+                          <p className="notice error">{budgetNotice}</p>
+                        )}
                       </details>
                     )}
                   </div>
@@ -727,10 +768,11 @@ function ResumeBudget({ job, onDone }: { job: any; onDone: () => void }) {
       setBusy(false);
     }
   }
+  // Any dimension may be the one that needs raising — including the累计 hours.
   const needsMore =
     plan &&
     !problem() &&
-    ["requests", "inputTokens", "outputTokens"].some(
+    ["requests", "inputTokens", "outputTokens", "seconds"].some(
       (key) => current[key] > plan.budget[key],
     );
   return (
@@ -749,6 +791,13 @@ function ResumeBudget({ job, onDone }: { job: any; onDone: () => void }) {
           {plan.parseRequired && (
             <p className="notice">
               尚未解析：解析完成后会显示新的范围与所需额度，解析结果会保留。
+            </p>
+          )}
+          {plan.time?.exhausted && (
+            <p className="notice">
+              累计执行时间已用完（{Math.round(plan.time.usedSeconds / 60)} 分钟 /
+              上限 {Math.round(plan.time.limitSeconds / 60)} 分钟），剩余时长无法预先估算；
+              请至少增加到 {Math.ceil((plan.time.usedSeconds + 1) / 3600)} 小时以上再继续。
             </p>
           )}
           <div className="form-grid">
@@ -799,6 +848,43 @@ function ResumeBudget({ job, onDone }: { job: any; onDone: () => void }) {
           <p className="muted">
             新额度是整个任务的累计总额：已用部分不清零，已完成的块与子单元继续复用。
           </p>
+          {plan.estimate?.requestsWithRetryAllowance && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = {
+                  ...current,
+                  requests: Math.max(
+                    required("requests"),
+                    plan.estimate.requestsWithRetryAllowance,
+                  ),
+                  inputTokens: Math.max(
+                    required("inputTokens"),
+                    plan.estimate.worstCaseInputTokens,
+                  ),
+                  outputTokens: Math.max(
+                    required("outputTokens"),
+                    plan.estimate.worstCaseOutputTokens,
+                  ),
+                };
+                if (
+                  limits &&
+                  (next.requests > limits.requests ||
+                    next.inputTokens > limits.inputTokens ||
+                    next.outputTokens > limits.outputTokens)
+                ) {
+                  setError(
+                    "含 429 重试余量的额度超过本次部署上限，请手动填写。",
+                  );
+                  return;
+                }
+                setError("");
+                setDraft(next);
+              }}
+            >
+              含 429 重试余量
+            </button>
+          )}
           {problem() && <p className="notice error">{problem()}</p>}
           <div className="button-row">
             <button
@@ -902,12 +988,20 @@ export function ProcessingTaskDetails({
           </p>
           {j.actualUsage && (
             <p className="muted">
-              供应商实际用量：{j.actualUsage.inputTokens.toLocaleString()} 输入、
-              {j.actualUsage.outputTokens.toLocaleString()} 输出
-              {j.actualUsage.missingAttempts
-                ? `（${j.actualUsage.missingAttempts} 次请求未返回用量，未按 0 记）`
-                : "（全部请求已返回用量）"}
-              。
+              供应商实际用量：
+              {j.actualUsage.inputTokens.toLocaleString()} 输入
+              {j.actualUsage.inputMissingAttempts
+                ? `（${j.actualUsage.inputMissingAttempts} 次未返回输入用量，未按 0 记）`
+                : ""}
+              、{j.actualUsage.outputTokens.toLocaleString()} 输出
+              {j.actualUsage.outputMissingAttempts
+                ? `（${j.actualUsage.outputMissingAttempts} 次未返回输出用量，未按 0 记）`
+                : ""}
+              {j.actualUsage.complete
+                ? "；输入与输出都有供应商数据。"
+                : j.actualUsage.requests === 0
+                  ? "；尚无模型请求。"
+                  : "；统计不完整，缺失项不代表未计费。"}
             </p>
           )}
           <div className="button-row">

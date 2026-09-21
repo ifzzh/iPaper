@@ -59,8 +59,25 @@ def _deploy_max_budget() -> dict:
 MAX_TRANSLATION_BUDGET = _deploy_max_budget()
 
 
-def default_budget(kind: str | None = None) -> dict:
+def _builtin_default(kind: str | None = None) -> dict:
     return dict(DEFAULT_TRANSLATION_BUDGET if kind in TRANSLATION_KINDS else DEFAULT_BUDGET)
+
+
+def default_budget(kind: str | None = None) -> dict:
+    """The default envelope, capped by a lower deployment ceiling.
+
+    ``IPAPER_TRANSLATION_MAX_*`` configures the maximum, not the default. When an
+    operator lowers the ceiling below the built-in default, the effective default
+    is the ceiling itself: a default that silently exceeded its own ceiling would
+    make every admission check meaningless.
+    """
+    builtin = _builtin_default(kind)
+    ceiling = budget_ceiling(kind)
+    return {key: min(builtin[key], ceiling[key]) for key in BUDGET_KEYS}
+
+
+def default_capped_by_ceiling(kind: str | None = None) -> bool:
+    return default_budget(kind) != _builtin_default(kind)
 
 
 def budget_ceiling(kind: str | None = None) -> dict:
@@ -104,11 +121,29 @@ class ProcessingJobs:
                         },
                     )
                 result[key] = number
+        # Validate the *composed* envelope on every path, including defaults and
+        # partially specified values: no admission may exceed the deployment cap.
+        over = {
+            key: {"dimension": key, "dimensionLabel": BUDGET_LABELS.get(key, key),
+                  "value": result[key], "limit": ceiling[key]}
+            for key in BUDGET_KEYS
+            if result[key] > ceiling[key]
+        }
+        if over:
+            raise ProcessingError(
+                "invalid_budget_configuration", 500,
+                details={"overage": over, "budget": result, "limit": ceiling,
+                         "hint": "IPAPER_TRANSLATION_MAX_* configures the maximum; a ceiling below the built-in default caps the default."},
+            )
         return result
 
     @staticmethod
     def budget_ceiling(kind=None):
         return budget_ceiling(kind)
+
+    @staticmethod
+    def default_capped_by_ceiling(kind=None):
+        return default_capped_by_ceiling(kind)
 
     @staticmethod
     def check_scope(estimate, budget, usage=None):
@@ -209,8 +244,25 @@ class ProcessingJobs:
                 total if total is not None else job["total"], result_id or job["result_id"], job_id))
             self._event(db, job_id, "progress", {"stage": stage, "completed": completed, "total": total})
 
-    def check(self, job_id):
+    def check_status(self, job_id):
+        """Cancellation and status only — no execution-time check.
+
+        Publishing already-saved work needs no clock, so a continuation that has
+        nothing left to request must not fail just because its time limit is spent.
+        """
         job = self.get(job_id)
+        with self.store.connection() as db:
+            user = db.execute("SELECT status FROM users WHERE id=?", (self.store.owner,)).fetchone()
+        if not user or user["status"] != "active":
+            raise ProcessingError("processing_cancelled", 409)
+        if job["cancel_requested"] or job["status"] == "cancelling":
+            raise ProcessingError("processing_cancelled", 409)
+        if job["status"] != "running":
+            raise ProcessingError("job_not_running", 409)
+        return job
+
+    def check(self, job_id):
+        job = self.check_status(job_id)
         with self.store.connection() as db:
             user=db.execute("SELECT status FROM users WHERE id=?",(self.store.owner,)).fetchone()
         if not user or user["status"]!="active":
@@ -376,29 +428,36 @@ class ProcessingJobs:
                 (job_id,),
             ).fetchall()
         input_tokens = output_tokens = 0
-        reported = missing = 0
+        input_reported = output_reported = 0
         for row in rows:
             try:
                 response = json.loads(row["response_json"] or "{}")
             except ValueError:
                 response = {}
-            has_input = type(response.get("inputTokens")) is int
-            has_output = type(response.get("outputTokens")) is int
-            if has_input:
+            # Each dimension is judged on its own: a supplier that reports only
+            # one of them must not make the other look like a trustworthy zero.
+            if type(response.get("inputTokens")) is int:
                 input_tokens += int(response["inputTokens"])
-            if has_output:
+                input_reported += 1
+            if type(response.get("outputTokens")) is int:
                 output_tokens += int(response["outputTokens"])
-            if has_input or has_output:
-                reported += 1
-            else:
-                missing += 1
+                output_reported += 1
+        total = len(rows)
+        input_missing = total - input_reported
+        output_missing = total - output_reported
         return {
-            "requests": len(rows),
+            "requests": total,
             "inputTokens": input_tokens,
             "outputTokens": output_tokens,
-            "reportedAttempts": reported,
-            "missingAttempts": missing,
-            "complete": bool(rows) and missing == 0,
+            "inputReportedAttempts": input_reported,
+            "outputReportedAttempts": output_reported,
+            "inputMissingAttempts": input_missing,
+            "outputMissingAttempts": output_missing,
+            "reportedAttempts": min(input_reported, output_reported),
+            "missingAttempts": max(input_missing, output_missing),
+            "inputComplete": bool(total) and input_missing == 0,
+            "outputComplete": bool(total) and output_missing == 0,
+            "complete": bool(total) and input_missing == 0 and output_missing == 0,
         }
 
     def recover(self):
@@ -417,3 +476,12 @@ class ProcessingJobs:
                            (encoded(checkpoint),encoded(usage),now(),job["id"]))
                 db.execute("UPDATE processing_attempts SET status='unknown',updated_at=? WHERE job_id=? AND status='started'", (now(), job["id"]))
                 self._event(db, job["id"], "interrupted", {"requiresExplicitResume": True})
+
+
+for _kind in sorted(TRANSLATION_KINDS):
+    if default_capped_by_ceiling(_kind):
+        print(
+            "[ipaper] deployment ceiling lowers the default translation budget for"
+            f" {_kind}: {default_budget(_kind)} (built-in {_builtin_default(_kind)})"
+        )
+        break

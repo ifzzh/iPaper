@@ -81,5 +81,28 @@ def install(application, directory, users, origin, patch):
             jobs.finish_attempt(job["id"], attempt, "completed",
                                 {"inputTokens": 80, "outputTokens": 40})
             jobs.finish(job["id"], "partial", error="processing_budget_exceeded")
+            # A second stopped job whose execution time is already exhausted, so
+            # "extend only the accumulated hours" can be exercised end to end.
+            spent, _ = jobs.create(
+                "c-4", "parse_translate",
+                {"kind": "parse_translate", "preflightId": "synthetic-spent-time",
+                 "parseId": None, "config": {"targetLanguage": "zh-CN"}},
+                budget={"requests": 2, "inputTokens": 1000, "outputTokens": 1000,
+                        "seconds": 3600},
+            )
+            jobs.claim(spent["id"])
+            spent_attempt = jobs.reserve_attempt(spent["id"], "model", "synthetic-spent",
+                                                 input_tokens=100, output_tokens=50)
+            jobs.finish_attempt(spent["id"], spent_attempt, "completed",
+                                {"inputTokens": 80, "outputTokens": 40})
+            jobs.finish(spent["id"], "interrupted", error="processing_time_budget")
+            with jobs.store.connection(write=True) as db:
+                usage = json.loads(
+                    db.execute("SELECT usage_json FROM processing_jobs WHERE id=?",
+                               (spent["id"],)).fetchone()[0]
+                )
+                usage["seconds"] = 3600
+                db.execute("UPDATE processing_jobs SET usage_json=? WHERE id=?",
+                           (json.dumps(usage), spent["id"]))
         run_as_identity(Identity(user["id"], user["username"], user["role"]), seed_stopped)
     service.start()

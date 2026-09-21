@@ -284,6 +284,9 @@ class ProcessingPipeline:
         overage = self.jobs.check_scope(estimate or {}, budget) if estimate else {}
         if preview:
             return {"estimate": estimate, "budget": budget, "limits": self.jobs.budget_ceiling(kind),
+                    # A deployment ceiling below the built-in default caps the
+                    # default; the page can explain that instead of guessing.
+                    "defaultCappedByCeiling": self.jobs.default_capped_by_ceiling(kind),
                     "exceedsBudget": bool(overage), "overage": overage, "kind": kind,
                     "parseRequired": not bool(parse_id), "pageCount": document["page_count"],
                     "selectedPages": len(set(pages)) if pages else document["page_count"],
@@ -364,7 +367,10 @@ class ProcessingPipeline:
                 pages=request.get("pages"),
                 block_ids=request.get("blockIds"),
                 target=request.get("config", {}).get("targetLanguage", "zh-CN"),
-                force=False,
+                # The executor uses force=True for an explicit retranslation: an
+                # earlier successful translation is not "already done" for this
+                # request, while units this task already saved are still reused.
+                force=job["kind"] == "retranslate",
                 checkpoint_root=scratch,
                 request=request,
             )
@@ -372,6 +378,25 @@ class ProcessingPipeline:
         for key in ("requests", "inputTokens", "outputTokens"):
             required[key] = int(usage.get(key) or 0) + int((estimate or {}).get(key) or 0)
         overage = self.jobs.check_scope(estimate or {}, budget, usage) if estimate else {}
+        # Time cannot be estimated in advance, but "no remaining execution time"
+        # is a known fact: a task with unfinished work and an exhausted clock must
+        # not be reported as sufficient, and must not be queued only to time out
+        # again immediately.
+        used_seconds = int(usage.get("seconds") or 0)
+        limit_seconds = int(budget.get("seconds") or 0)
+        remaining_seconds = max(0, limit_seconds - used_seconds)
+        remaining_work = bool((estimate or {}).get("requests")) or not parse_id
+        if remaining_work and remaining_seconds <= 0:
+            overage["seconds"] = {
+                "dimension": "seconds",
+                "dimensionLabel": "累计执行时间",
+                "required": used_seconds + 1,  # a floor, not an estimate of the job
+                "remaining": 0,
+                "limit": limit_seconds,
+                "alreadyUsed": used_seconds,
+                "floor": True,
+            }
+        required["seconds"] = used_seconds + 1 if remaining_work else used_seconds
         return {
             "jobId": job_id,
             "kind": job["kind"],
@@ -381,11 +406,20 @@ class ProcessingPipeline:
             "estimate": estimate,
             "usage": usage,
             "budget": budget,
-            "required": {**required, "seconds": int(usage.get("seconds") or 0)},
+            "required": required,
             "limits": self.jobs.budget_ceiling(job["kind"]),
             "overage": overage,
             "sufficient": not overage,
-            "secondsBasis": "已用累计时间；剩余时长无法预先估算，续跑按同一上限继续计时。",
+            "remainingWork": remaining_work,
+            "time": {
+                "usedSeconds": used_seconds,
+                "limitSeconds": limit_seconds,
+                "remainingSeconds": remaining_seconds,
+                "exhausted": remaining_work and remaining_seconds <= 0,
+            },
+            "secondsBasis": (
+                "已用累计时间；剩余时长无法预先估算——若已耗尽，至少需要留出正的可执行时间。"
+            ),
         }
 
     def resume(self, job_id, budget=None):
@@ -395,6 +429,24 @@ class ProcessingPipeline:
         job = self.jobs.get(job_id)
         if job["kind"] not in TRANSLATION_KINDS:
             raise ProcessingError("unsupported_job_kind_for_budget", 400)
+        if budget is not None:
+            plan = self.resume_plan(job_id)
+            merged = self.jobs.budget({**plan["budget"], **budget}, kind=job["kind"])
+            used_seconds = int(plan["usage"].get("seconds") or 0)
+            if plan["remainingWork"] and merged["seconds"] <= used_seconds:
+                # Queuing this would only time out again immediately.
+                raise ProcessingError(
+                    "budget_time_exhausted", 409,
+                    details={
+                        "dimension": "seconds",
+                        "dimensionLabel": "累计执行时间",
+                        "alreadyUsed": used_seconds,
+                        "requested": merged["seconds"],
+                        "minimum": used_seconds + 1,
+                        "budget": merged,
+                        "usage": plan["usage"],
+                    },
+                )
         self.jobs.resume(job_id, budget)
 
     def _check_source(self, paper_id, sha):
@@ -524,7 +576,10 @@ class ProcessingPipeline:
         return result_id
 
     def _translate(self, job_id, parse_id, request):
-        job = self.jobs.check(job_id)
+        # Status/cancel only: whether any model work still needs to happen is
+        # decided below, and an exhausted clock must not fail a job that only has
+        # to publish work it already saved.
+        job = self.jobs.check_status(job_id)
         config = request["config"]
         profile = self.profiles.get(secret=True)
         if profile["revision"] != config["revision"]:
@@ -558,7 +613,7 @@ class ProcessingPipeline:
             if not blocks:
                 break
             for block in blocks:
-                self.jobs.check(job_id)
+                self.jobs.check_status(job_id)
                 if request["pages"] and block["source"].get("page") not in request["pages"]:
                     continue
                 if request["blockIds"] and block["id"] not in request["blockIds"]:
@@ -566,6 +621,9 @@ class ProcessingPipeline:
                 if block["translation"] and block["translation"]["status"] == "completed" and job["kind"] != "retranslate":
                     completed += 1
                     continue
+                # Real model work is about to happen (or saved units published),
+                # so the execution-time budget applies from here.
+                self.jobs.check(job_id)
                 generation, original = self.store.begin_translation(result_id, block["id"])
                 units = units_for(original)
                 checkpoint_file = self._unit_checkpoint_path(scratch,result_id,block["id"],request)

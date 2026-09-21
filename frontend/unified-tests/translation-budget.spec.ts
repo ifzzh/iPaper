@@ -207,3 +207,69 @@ test("stopped translation can be continued with a larger whole-task budget", asy
   await expect(detail).toContainText("已预留 1/40 次请求", { timeout: 30000 });
   expect(errors).toEqual([]);
 });
+
+// R1 regression: a job whose accumulated hours are exhausted must be resumable by
+// extending only the hours (the dimension that is actually short), and the server
+// must accept it without inventing a remaining-time estimate.
+test("exhausted execution time can be extended without touching other dimensions", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/?paper=c-4&view=reader");
+  await page.getByLabel("账号", { exact: true }).fill("reader_pdf");
+  await page.getByLabel("密码", { exact: true }).fill("workbench-test-pass");
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+  await expect(
+    page.getByRole("navigation").getByRole("button", { name: "任务中心", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("navigation").getByRole("button", { name: "任务中心", exact: true }).click();
+  await expect(page.locator(".task-list button").first()).toBeVisible({ timeout: 20000 });
+
+  // Find the job whose plan reports an exhausted clock.
+  const jobs = (await (await page.request.get("/api/processing/jobs")).json()).jobs as any[];
+  const stopped = jobs.filter((job) => job.status === "partial" || job.status === "interrupted");
+  let target: any = null;
+  for (const job of stopped) {
+    const plan = await (
+      await page.request.post(`/api/processing/jobs/${job.id}/resume-plan`, {
+        headers: { "X-CSRF-Token": (await page.context().cookies()).find((c) => c.name === "paperpilot_csrf")?.value || "" },
+        data: {},
+      })
+    ).json();
+    if (plan.plan?.time?.exhausted) {
+      target = job;
+      break;
+    }
+  }
+  expect(target, "a time-exhausted stopped job is seeded").toBeTruthy();
+
+  await page
+    .locator(".task-list button", { hasText: String(target.id).slice(0, 8) })
+    .first()
+    .click();
+  const detail = page.locator(".processing-task");
+  await expect(detail).toBeVisible();
+  await detail.getByRole("button", { name: "调整额度并继续未完成部分" }).click();
+  const resume = page.locator(".processing-resume-budget");
+  await expect(resume).toContainText("累计执行时间已用完");
+
+  const inputs = resume.locator("input");
+  const requestsBefore = await inputs.nth(0).inputValue();
+  const inputBefore = await inputs.nth(1).inputValue();
+  const outputBefore = await inputs.nth(2).inputValue();
+  const continueButton = resume.getByRole("button", { name: "保存额度并继续" });
+  // Nothing changed yet: the requirement for positive remaining time blocks it.
+  await expect(continueButton).toBeDisabled();
+
+  // Raising only the accumulated hours must be enough.
+  await inputs.nth(3).fill("4");
+  await expect(continueButton).toBeEnabled();
+  await expect(inputs.nth(0)).toHaveValue(requestsBefore);
+  await expect(inputs.nth(1)).toHaveValue(inputBefore);
+  await expect(inputs.nth(2)).toHaveValue(outputBefore);
+  await continueButton.click();
+  await expect(detail).toContainText("已用 1/4 小时", { timeout: 30000 });
+  expect(errors).toEqual([]);
+});

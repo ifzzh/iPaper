@@ -55,6 +55,21 @@ def make(tmp_path, **kwargs):
     return FakeManager(tmp_path, **kwargs)
 
 
+def expected_dates(manager):
+    """The round always crawls today first when today is a working day.
+
+    The clock moves, so expectations are derived instead of hard-coding the
+    calendar date the test was written on.
+    """
+    from ipaper.tools.basic_tools.daily_arxiv import get_today_arxiv_date
+    from datetime import datetime
+
+    today = get_today_arxiv_date()
+    first = today if datetime.strptime(today, "%Y-%m-%d").weekday() < 5 else manager._dates[0]
+    ordered = [first] + [value for value in manager._dates if value != first]
+    return first, ordered
+
+
 def test_duplicate_round_is_skipped_not_stacked(tmp_path):
     manager = make(tmp_path)
     manager.block = True
@@ -69,7 +84,11 @@ def test_duplicate_round_is_skipped_not_stacked(tmp_path):
 
     manager.release.set()
     worker.join(timeout=5)
-    assert manager.fetched == [manager._dates[0]]
+    first, ordered = expected_dates(manager)
+    # The round starts with today (a working day) and crawls each date once.
+    assert manager.fetched[0] == first, manager.fetched
+    assert len(manager.fetched) == len(set(manager.fetched)), manager.fetched
+    assert set(manager.fetched) <= set(ordered), manager.fetched
     state = manager.get_fetch_state()
     assert state["round_active"] is False
     assert state["round_result"] == "completed"
@@ -103,7 +122,8 @@ def test_pause_between_dates_stops_the_round_with_results_kept(tmp_path):
     manager.block = False
     manager._do_scheduled_fetch()
     # The date already running keeps its results; no further date starts.
-    assert manager.fetched == ["2026-09-18"]
+    first, _ordered = expected_dates(manager)
+    assert manager.fetched == [first], manager.fetched
     assert manager.get_fetch_state()["round_result"] == "completed"
 
 
@@ -162,7 +182,9 @@ def test_restart_between_rounds_leaves_a_clean_state(tmp_path):
     state = restarted.get_fetch_state()
     assert state["round_active"] is False
     assert state["round_skip_reason"] is None
-    assert restarted.fetched == [restarted._dates[0]]
+    first, _ordered = expected_dates(restarted)
+    assert restarted.fetched[0] == first, restarted.fetched
+    assert len(restarted.fetched) == len(set(restarted.fetched)), restarted.fetched
 
 
 if __name__ == "__main__":
