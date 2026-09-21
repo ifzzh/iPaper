@@ -189,8 +189,8 @@ def test_saved_answer_is_copied_idempotently_and_owner_bound(application):
             db.execute(
                 "INSERT INTO chats (session_id,paper_id,history,created_at,updated_at,title,owner_id)"
                 " VALUES (?,?,?,?,?,?,?)",
-                ("notes-session", OWNER_PAPER, json.dumps(history), "2026-09-21T00:00:00+00:00",
-                 "2026-09-21T00:00:00+00:00", "笔记测试", paper_owner),
+                ("notes-session", OWNER_PAPER, json.dumps(history), "1790000000.1",
+                 "1790000000.2", "笔记测试", paper_owner),
             )
             db.execute(
                 "INSERT INTO processing_chat_sources (owner_id,session_id,message_key,sources_json)"
