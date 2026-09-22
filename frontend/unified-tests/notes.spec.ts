@@ -2,6 +2,274 @@ import { test, expect } from "@playwright/test";
 
 // Persistent highlights, annotations, the main note and Markdown export, on the
 // synthetic structured fixture (fake supplier; no real model call).
+// --- V1/V2/V5 regressions from the independent 1.13.1 review ----------------
+
+async function resetNote(page: any, markdown = "baseline") {
+  const headers = {
+    "X-CSRF-Token": (await page.context().cookies()).find((c) => c.name === "paperpilot_csrf")?.value || "",
+  };
+  let current = (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note;
+  for (const conflict of current.conflicts || []) {
+    if (!String(conflict.currentRevision || "").startsWith("resolved:")) {
+      await page.request.post(`/api/paper/c-4/reading/note/conflicts/${conflict.id}`, {
+        headers,
+        data: { choice: "current", revision: current.revision },
+      });
+    }
+  }
+  current = (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note;
+  const reset = await page.request.put("/api/paper/c-4/reading/note", {
+    headers,
+    data: { markdown, revision: current.revision },
+  });
+  expect(reset.status()).toBe(200);
+  return headers;
+}
+
+test("V1: an older failing save cannot replace newer typing", async ({ page }) => {
+  await enterReader(page);
+  await resetNote(page);
+  await page.reload();
+  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30000 });
+  await page.getByRole("tab", { name: /笔记/ }).click();
+  await expect(page.locator(".note-textarea")).toHaveValue("baseline");
+
+  let release!: () => void;
+  let captured!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const ready = new Promise<void>((r) => (captured = r));
+  let first = true;
+  await page.route("**/api/paper/c-4/reading/note", async (route) => {
+    if (route.request().method() !== "PUT") return route.continue();
+    if (first) {
+      first = false;
+      captured();
+      await gate;
+    }
+    await route.abort("failed");
+  });
+  await page.locator(".note-textarea").fill("A 较早的请求仍在途中");
+  await ready;
+  await page.locator(".note-textarea").fill("B 最新未保存的正文\n\n- 要点一\n- 要点二\n\n第二段中文。");
+  release();
+  await expect(page.locator(".note-status")).toContainText("保存失败", { timeout: 20000 });
+  await page.getByRole("tab", { name: /问答/ }).click();
+  await page.getByRole("tab", { name: /笔记/ }).click();
+  // The newest text survives the panel switch and is still recoverable.
+  await expect(page.locator(".note-textarea")).toHaveValue(
+    "B 最新未保存的正文\n\n- 要点一\n- 要点二\n\n第二段中文。",
+    { timeout: 20000 },
+  );
+  await page.unroute("**/api/paper/c-4/reading/note");
+  await expect
+    .poll(async () => (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note.markdown, {
+      timeout: 30000,
+    })
+    .toBe("B 最新未保存的正文\n\n- 要点一\n- 要点二\n\n第二段中文。");
+  await expect(page.locator(".note-status")).toContainText("已保存", { timeout: 30000 });
+});
+
+test("V1: an older successful response keeps the newer recovery draft", async ({ page }) => {
+  await enterReader(page);
+  await resetNote(page);
+  await page.reload();
+  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30000 });
+  await page.getByRole("tab", { name: /笔记/ }).click();
+  await expect(page.locator(".note-textarea")).toHaveValue("baseline");
+
+  let release!: () => void;
+  let captured!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const ready = new Promise<void>((r) => (captured = r));
+  let first = true;
+  await page.route("**/api/paper/c-4/reading/note", async (route) => {
+    if (route.request().method() !== "PUT") return route.continue();
+    if (first) {
+      first = false;
+      const response = await route.fetch();
+      captured();
+      await gate;
+      return route.fulfill({ response });
+    }
+    await route.abort("failed");
+  });
+  await page.locator(".note-textarea").fill("A 已确认的较早文本");
+  await ready;
+  await page.locator(".note-textarea").fill("B 面板切换前的最新文本");
+  release();
+  await page.waitForTimeout(300);
+  await page.getByRole("tab", { name: /问答/ }).click();
+  await page.getByRole("tab", { name: /笔记/ }).click();
+  await expect(page.locator(".note-textarea")).toHaveValue("B 面板切换前的最新文本", {
+    timeout: 20000,
+  });
+  await page.unroute("**/api/paper/c-4/reading/note");
+  await expect
+    .poll(async () => (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note.markdown, {
+      timeout: 30000,
+    })
+    .toBe("B 面板切换前的最新文本");
+});
+
+test("V2: keeping the server version updates the editor and the status", async ({ page }) => {
+  await enterReader(page);
+  const headers = await resetNote(page);
+  await page.reload();
+  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30000 });
+  await page.getByRole("tab", { name: /笔记/ }).click();
+  await expect(page.locator(".note-textarea")).toHaveValue("baseline");
+
+  const initial = (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note;
+  await page.request.put("/api/paper/c-4/reading/note", {
+    headers,
+    data: { markdown: "REMOTE version explicitly selected by the user", revision: initial.revision },
+  });
+  await page.locator(".note-textarea").fill("LOCAL draft to discard in favour of remote");
+  const keepServer = page.getByRole("button", { name: "保留服务器版本", exact: true }).first();
+  await expect(keepServer).toBeVisible({ timeout: 20000 });
+  const response = page.waitForResponse(
+    (r) => r.request().method() === "POST" && r.url().includes("/reading/note/conflicts/"),
+  );
+  await keepServer.click();
+  expect((await response).status()).toBe(200);
+  await expect(page.locator(".note-textarea")).toHaveValue(
+    "REMOTE version explicitly selected by the user",
+    { timeout: 20000 },
+  );
+  await expect(page.locator(".note-status")).toContainText("已保存", { timeout: 20000 });
+  // Reload: the decision stuck and nothing new is pending.
+  await page.reload();
+  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30000 });
+  await page.getByRole("tab", { name: /笔记/ }).click();
+  await expect(page.locator(".note-textarea")).toHaveValue(
+    "REMOTE version explicitly selected by the user",
+    { timeout: 20000 },
+  );
+  await expect(page.locator(".note-status")).toContainText("已保存");
+});
+
+test("V2: keeping my draft applies the text confirmed now, not the stale snapshot", async ({ page }) => {
+  await enterReader(page);
+  const headers = await resetNote(page);
+  await page.reload();
+  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30000 });
+  await page.getByRole("tab", { name: /笔记/ }).click();
+  await expect(page.locator(".note-textarea")).toHaveValue("baseline");
+
+  const initial = (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note;
+  await page.request.put("/api/paper/c-4/reading/note", {
+    headers,
+    data: { markdown: "REMOTE text that should be preserved", revision: initial.revision },
+  });
+  await page.locator(".note-textarea").fill("LOCAL draft snapshot");
+  const keepDraft = page.getByRole("button", { name: "保留我的草稿", exact: true }).first();
+  await expect(keepDraft).toBeVisible({ timeout: 20000 });
+  // Keep typing while the conflict is pending: the decision must use this text.
+  await page.locator(".note-textarea").fill("LOCAL draft snapshot plus later typing");
+  await keepDraft.click();
+  await expect(page.locator(".note-textarea")).toHaveValue(
+    "LOCAL draft snapshot plus later typing",
+    { timeout: 20000 },
+  );
+  const after = (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note;
+  expect(after.markdown).toBe("LOCAL draft snapshot plus later typing");
+  // The replaced server version is still recoverable somewhere.
+  expect(after.conflicts.some((item: any) => item.markdown.includes("REMOTE text that should be preserved"))).toBe(
+    true,
+  );
+});
+
+test("V2: a retry that discovers a remote change offers an actionable conflict", async ({ page }) => {
+  await enterReader(page);
+  const headers = await resetNote(page);
+  await page.reload();
+  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30000 });
+  await page.getByRole("tab", { name: /笔记/ }).click();
+  await expect(page.locator(".note-textarea")).toHaveValue("baseline");
+
+  await page.route("**/api/paper/c-4/reading/note", (route) =>
+    route.request().method() === "PUT"
+      ? route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: '{"error":"processing_storage_failed"}',
+        })
+      : route.continue(),
+  );
+  await page.locator(".note-textarea").fill("LOCAL failed draft kept while reconciling");
+  await expect(page.locator(".note-status")).toContainText("保存失败", { timeout: 20000 });
+  const before = (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note;
+  await page.request.put("/api/paper/c-4/reading/note", {
+    headers,
+    data: { markdown: "REMOTE edit written while the local save was offline", revision: before.revision },
+  });
+  await page.unroute("**/api/paper/c-4/reading/note");
+  const retry = page.getByRole("button", { name: "重试保存", exact: true });
+  await retry.focus();
+  await page.keyboard.press("Enter");
+  // There is no server-side conflict row on this path, but the buttons must exist.
+  await expect(page.locator(".note-status")).toContainText("待选择", { timeout: 20000 });
+  await expect(page.getByRole("button", { name: "保留服务器版本", exact: true }).first()).toBeVisible({
+    timeout: 5000,
+  });
+  await expect(page.getByRole("button", { name: "保留我的草稿", exact: true }).first()).toBeVisible();
+});
+
+test("V5: an excerpt in the note links back to its source annotation", async ({ page }) => {
+  await enterReader(page);
+  const headers = await resetNote(page);
+  const doc = (
+    await (await page.request.post("/api/paper/c-4/reading-document", { headers, data: {} })).json()
+  ).document;
+  const created = await page.request.post("/api/paper/c-4/reading/annotations", {
+    headers,
+    data: {
+      documentId: doc.id,
+      kind: "highlight",
+      excerpt: "Synthetic reader validation",
+      color: "violet",
+      anchor: { mode: "pdf", page: 1, rects: [{ x: 0.1, y: 0.12, w: 0.5, h: 0.04 }] },
+    },
+  });
+  expect(created.status()).toBe(201);
+  const annotation = (await created.json()).annotation;
+  const current = (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note;
+  const inserted = await page.request.post("/api/paper/c-4/reading/note/excerpts", {
+    headers,
+    data: { annotationId: annotation.id, revision: current.revision },
+  });
+  expect(inserted.status()).toBe(200);
+
+  await page.reload();
+  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30000 });
+  await page.getByRole("tab", { name: /笔记/ }).click();
+  await expect(page.locator(".note-textarea")).toHaveValue(/Synthetic reader validation/);
+  await page.locator(".note-sources summary").click();
+  const backlink = page.locator(".note-sources button", { hasText: "回到来源" }).first();
+  await expect(backlink).toBeVisible({ timeout: 20000 });
+  await backlink.click();
+  // The click opens the annotation's own detail and marks it as located.
+  await expect(page.locator(".annotation-detail")).toBeVisible({ timeout: 20000 });
+  await expect(page.locator(".annotation-detail")).toContainText("已定位到来源");
+
+  // A deleted source degrades explicitly instead of faking a position.
+  await page.request.delete(`/api/paper/c-4/reading/annotations/${annotation.id}`, {
+    headers,
+    data: { revision: annotation.revision },
+  });
+  await page.reload();
+  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30000 });
+  await page.getByRole("tab", { name: /笔记/ }).click();
+  await page.locator(".note-sources summary").click();
+  await page.locator(".note-sources button", { hasText: "回到来源" }).first().click();
+  await expect(page.locator(".reader-panel-notice")).toContainText(
+    /不可用|已删除|已变化|已保留/,
+    { timeout: 20000 },
+  );
+  await page.getByRole("tab", { name: /笔记/ }).click();
+  await expect(page.locator(".note-textarea")).toHaveValue(/Synthetic reader validation/);
+});
+
 test("two browser pages editing one note get a resolvable conflict", async ({ browser, page }) => {
   await enterReader(page);
   const second = await browser.newContext({ storageState: "/tmp/ipaper-notes-state.json" });
@@ -534,4 +802,45 @@ test("the structure translation side accepts an annotation in the browser", asyn
   expect(typeof item.anchor.translationRevision).toBe("string");
   await row.getByRole("button", { name: "删除", exact: true }).click();
   await expect(page.locator(".annotation-list")).not.toContainText("结构译文", { timeout: 20000 });
+});
+
+test("V3: the editor honours Retry-After, keeps typing and saves the latest text", async ({ page }) => {
+  await enterReader(page);
+  await resetNote(page);
+  await page.reload();
+  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30000 });
+  await page.getByRole("tab", { name: /笔记/ }).click();
+  await expect(page.locator(".note-textarea")).toHaveValue("baseline");
+
+  // A simulated 429 (isolated route, not a real server window) with a short wait.
+  let limited = 0;
+  await page.route("**/api/paper/c-4/reading/note", (route) => {
+    if (route.request().method() !== "PUT") return route.continue();
+    limited += 1;
+    return route.fulfill({
+      status: 429,
+      contentType: "application/json",
+      headers: { "Retry-After": "2" },
+      body: '{"error":"请求过于频繁，请稍后重试"}',
+    });
+  });
+  await page.locator(".note-textarea").fill("等待期间的第一段");
+  await expect(page.locator(".note-status")).toContainText("保存失败", { timeout: 20000 });
+  await expect(page.locator(".note-editor")).toContainText(/秒后再试|再保存/, { timeout: 20000 });
+  // Typing continues while the window is open, and the newest text is kept.
+  await page.locator(".note-textarea").fill("等待期间继续输入的最新正文");
+  await expect(page.locator(".note-textarea")).toHaveValue("等待期间继续输入的最新正文");
+  await expect(page.locator(".note-status")).toContainText("保存失败");
+  const duringWait = (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note.markdown;
+  expect(duringWait).toBe("baseline");
+  // The fixed retry timers must not hammer a long window: a handful of attempts only.
+  expect(limited).toBeLessThanOrEqual(4);
+
+  await page.unroute("**/api/paper/c-4/reading/note");
+  await expect
+    .poll(async () => (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note.markdown, {
+      timeout: 30000,
+    })
+    .toBe("等待期间继续输入的最新正文");
+  await expect(page.locator(".note-status")).toContainText("已保存", { timeout: 30000 });
 });

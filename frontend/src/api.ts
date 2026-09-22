@@ -2,6 +2,8 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     public code: string,
+    /** Seconds the server asked us to wait (Retry-After), when it said so. */
+    public retryAfter: number | null = null,
   ) {
     super(code);
   }
@@ -186,9 +188,14 @@ export async function request(
   )
     window.dispatchEvent(new Event("ipaper-session-expired"));
   if (!response.ok || obj?.success === false || obj?.error) {
+    // A 429 carries Retry-After; callers must wait that long instead of
+    // hammering the endpoint with a fixed short backoff.
+    const header = response.headers.get("Retry-After");
+    const parsed = header !== null && /^\d+$/.test(header.trim()) ? Number(header) : null;
     throw new ApiError(
       response.status,
       typeof obj?.error === "string" ? obj.error : "request_failed",
+      response.status === 429 ? parsed : null,
     );
   }
   return data;

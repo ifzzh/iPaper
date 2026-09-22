@@ -815,24 +815,79 @@ export function PdfReader({
   useEffect(() => {
     loadNote();
   }, [loadNote]);
+  const liveNoteDraft = useRef<string | null>(null);
   const resolveNoteConflict = useCallback(
-    async (conflictId: string, choice: "current" | "draft") => {
+    async (
+      conflictId: string | null,
+      choice: "current" | "draft",
+      options?: { markdown?: string; revision?: string | null },
+    ) => {
+      if (!conflictId) return null;
       try {
         const value = await api<{ note: NotePayload }>(
           `/api/paper/${encodeURIComponent(paper.id)}/reading/note/conflicts/${conflictId}`,
           "POST",
-          { choice, revision: note?.revision ?? null },
+          {
+            choice,
+            revision: options?.revision ?? note?.revision ?? null,
+            ...(options?.markdown !== undefined
+              ? { markdown: options.markdown }
+              : choice === "draft" && liveNoteDraft.current
+                ? { markdown: liveNoteDraft.current }
+                : {}),
+          },
         );
         setNote(value.note);
         setNoteError("");
+        return value.note;
       } catch (e) {
         setNoteError(errorText(e));
         // The decision was made against a version that moved on: show the
         // preserved newer content instead of pretending nothing happened.
         await loadNote();
+        return null;
       }
     },
     [paper.id, note?.revision, loadNote],
+  );
+  /** Note excerpts link back through the annotation's own controlled source. */
+  const openNoteAnnotation = useCallback(
+    async (annotationId: string) => {
+      if (!annotationId) return false;
+      const known = notes.items.find((item) => item.id === annotationId);
+      let target = known;
+      if (!target) {
+        try {
+          const value = await api<{ annotation: Annotation }>(
+            `/api/paper/${encodeURIComponent(paper.id)}/reading/annotations/${annotationId}`,
+          );
+          target = value.annotation;
+        } catch {
+          setNoteError("这条摘录的来源批注已被删除或不可用；摘录本身已保留。");
+          return false;
+        }
+      }
+      if (target.deleted) {
+        // The excerpt stays; the annotation that produced it is gone.
+        setNoteError("这条摘录的来源批注已被删除；摘录已保留，定位仅供参考。");
+      }
+      setOpenedAnnotation(target);
+      setPanelTab("annotations");
+      setChat(true);
+      if (target.canNavigate && target.anchor?.mode === "pdf") {
+        jump((target.anchor as any).page);
+      } else if (target.canNavigate && target.anchor?.mode === "structure") {
+        // Structure records live in the structured reader; open that view.
+        location.assign(
+          `/?view=reader&paper=${encodeURIComponent(paper.id)}&content=structure`,
+        );
+      }
+      if (!target.canNavigate) {
+        setNoteError(target.notice || "来源已变化，无法定位到原位置；摘录已保留。");
+      }
+      return true;
+    },
+    [paper.id, notes.items],
   );
   const editAnnotation = useCallback(
     async (annotation: Annotation, values: { comment?: string; color?: AnnotationColor }) => {
@@ -1446,6 +1501,7 @@ export function PdfReader({
                   </button>
                 ))}
               </div>
+              {noteError && <p className="notice error reader-panel-notice">{noteError}</p>}
               <NoteConflictBanner
                 note={note}
                 onResolve={resolveNoteConflict}
@@ -1490,6 +1546,10 @@ export function PdfReader({
                     onOpenSource={(source) => onSource?.(source.sourceId)}
                     onReloadNote={loadNote}
                     onResolveConflict={resolveNoteConflict}
+                    onOpenAnnotation={openNoteAnnotation}
+                    onDraftChange={(text) => {
+                      liveNoteDraft.current = text;
+                    }}
                     onInsertExcerpt={
                       openedAnnotation
                         ? async () => {

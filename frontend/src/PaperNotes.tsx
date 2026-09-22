@@ -48,7 +48,13 @@ export type NotePayload = {
   revision: string | null;
   exists: boolean;
   updatedAt: string | null;
-  entries: Array<{ id: string; kind: "excerpt" | "answer"; content: Record<string, unknown>; createdAt: string }>;
+  entries: Array<{
+    id: string;
+    kind: "excerpt" | "answer";
+    annotationId?: string | null;
+    content: Record<string, unknown>;
+    createdAt: string;
+  }>;
   conflicts: Array<{ id: string; markdown: string; baseRevision: string; currentRevision: string; createdAt: string }>;
   duplicate?: boolean;
 };
@@ -292,6 +298,8 @@ export type NoteDraft = {
   baseRevision: string | null;
   failed: boolean;
   at: number;
+  /** When the server asked us to wait, the deadline survives a remount. */
+  retryAt?: number;
 };
 
 const noteDrafts = new Map<string, NoteDraft>();
@@ -335,7 +343,11 @@ export function NoteConflictBanner({
   onOpen,
 }: {
   note: NotePayload | null;
-  onResolve: (conflictId: string, choice: "current" | "draft") => Promise<void> | void;
+  onResolve: (
+    conflictId: string,
+    choice: "current" | "draft",
+    options?: { markdown?: string; revision?: string | null },
+  ) => Promise<unknown> | unknown;
   onOpen?: () => void;
 }) {
   const [show, setShow] = useState(false);
@@ -381,6 +393,16 @@ export function NoteConflictBanner({
   );
 }
 
+type PendingConflict = {
+  /** A server-side conflict row, or a divergence detected by reconciliation. */
+  kind: "server" | "local";
+  id: string | null;
+  mine: string;
+  theirs: string;
+  /** The server revision the user is looking at; decisions must match it. */
+  revision: string | null;
+};
+
 export function NoteEditor({
   paperId,
   ownerId = noteOwner(),
@@ -391,6 +413,8 @@ export function NoteEditor({
   entries,
   onOpenSource,
   onResolveConflict,
+  onOpenAnnotation,
+  onDraftChange,
   onError,
 }: {
   paperId: string;
@@ -401,16 +425,32 @@ export function NoteEditor({
   onInsertExcerpt?: () => Promise<void> | void;
   entries?: NotePayload["entries"];
   onOpenSource?: (source: { sourceId: string; label: string }) => void;
-  onResolveConflict?: (conflictId: string, choice: "current" | "draft") => Promise<void>;
+  onResolveConflict?: (
+    conflictId: string | null,
+    choice: "current" | "draft",
+    options?: { markdown?: string; revision?: string | null },
+  ) => Promise<NotePayload | null>;
+  onOpenAnnotation?: (annotationId: string) => Promise<boolean> | boolean;
+  /** Lets the panel-level conflict entry use the text the editor holds now. */
+  onDraftChange?: (text: string | null) => void;
   onError?: (message: string) => void;
 }) {
   const key = noteDraftKey(ownerId, paperId);
+  // Changes when a conflict row is resolved elsewhere, so the editor can adopt
+  // a decision taken from the panel-level banner even if the revision is stable.
+  const conflictState = (note?.conflicts || [])
+    .map((item) => `${item.id}:${String(item.currentRevision || "")}`)
+    .join("|");
   const [draft, setDraft] = useState("");
+  const latestDraft = useRef<string | null>(null);
   const [status, setStatus] = useState<"idle" | "dirty" | "saving" | "saved" | "failed" | "conflict">(
     "idle",
   );
   const [message, setMessage] = useState("");
   const [preview, setPreview] = useState(false);
+  const [conflict, setConflict] = useState<PendingConflict | null>(null);
+  const [deciding, setDeciding] = useState(false);
+  const [waitSeconds, setWaitSeconds] = useState(0);
   const revision = useRef<string | null>(null);
   const savedText = useRef("");
   const editVersion = useRef(0);
@@ -421,37 +461,31 @@ export function NoteEditor({
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted = useRef(true);
   const draftRef = useRef("");
+  const conflictRef = useRef<PendingConflict | null>(null);
+  const decidingRef = useRef(false);
+  const waitUntil = useRef(0);
 
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      onDraftChange?.(null);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // New paper/owner: never let an old response or the old text leak across.
+  // New paper/owner: an old response or the old text must never leak across.
   useEffect(() => {
     epoch.current += 1;
     desired.current = null;
     retries.current = 0;
+    conflictRef.current = null;
+    setConflict(null);
     if (timer.current) clearTimeout(timer.current);
   }, [key]);
 
-  // Adopt the server copy only when nothing unsaved is waiting locally — or when
-  // the server now holds exactly the local text (a resolved conflict).
-  useEffect(() => {
-    if (!note) return;
-    if (draftRef.current !== savedText.current && draftRef.current !== note.markdown) return;
-    if (draftRef.current === note.markdown) {
-      noteDrafts.delete(key);
-      setMessage("");
-    }
-    revision.current = note.revision;
-    savedText.current = note.markdown;
-    draftRef.current = note.markdown;
-    setDraft(note.markdown);
-    setStatus(note.revision ? "saved" : "idle");
-  }, [note?.revision, note?.paperId, key]);
+  // Adopt the server copy when nothing unsaved is waiting locally, or when the
+  // server now holds exactly what the editor shows (a completed decision).
 
   // Recover a draft that outlived the panel (same session, same owner+paper).
   useEffect(() => {
@@ -470,28 +504,89 @@ export function NoteEditor({
         ? "上次保存失败的草稿已恢复，可以直接重试保存。"
         : "这个会话里还有未保存的草稿，已恢复。",
     );
+    // The pump lives across panel switches: resume saving this draft instead of
+    // leaving it stranded until the user touches the editor again.
+    waitUntil.current = stored.retryAt && stored.retryAt > Date.now() ? stored.retryAt : 0;
+    if (waitUntil.current) {
+      setStatus("failed");
+      setMessage(
+        `服务器要求约 ${Math.ceil((waitUntil.current - Date.now()) / 1000)} 秒后再保存；内容仍保留在编辑区。`,
+      );
+      scheduleRetry(Math.min(waitUntil.current - Date.now(), 60_000));
+    } else {
+      scheduleRetry(300);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  const record = useCallback(
-    (markdown: string, failed: boolean) => {
-      noteDrafts.set(key, { markdown, baseRevision: revision.current, failed, at: Date.now() });
+  /** The draft registry always carries the newest text, never a request snapshot. */
+  const recordLatest = useCallback(
+    (failed: boolean, base?: string | null) => {
+      noteDrafts.set(key, {
+        markdown: draftRef.current,
+        baseRevision: base === undefined ? revision.current : base,
+        failed,
+        at: Date.now(),
+        retryAt: waitUntil.current > Date.now() ? waitUntil.current : undefined,
+      });
     },
     [key],
   );
 
-  /** Serialised save pump: one PUT at a time, newest text wins. */
+  const openConflict = useCallback(
+    (pending: PendingConflict) => {
+      conflictRef.current = pending;
+      setConflict(pending);
+      setStatus("conflict");
+      if (timer.current) clearTimeout(timer.current);
+      desired.current = null;
+      // Keep the newest text as a recoverable draft; the base revision is NOT
+      // advanced, so a later plain save cannot silently skip the decision.
+      recordLatest(false, pending.revision);
+    },
+    [recordLatest],
+  );
+
+  const scheduleRetry = useCallback(
+    (delayMs: number) => {
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => {
+        if (conflictRef.current || decidingRef.current) return;
+        desired.current = draftRef.current;
+        void pumpRef.current();
+      }, delayMs);
+    },
+    [],
+  );
+
+  /** Serialised save pump: one PUT at a time, the newest text wins. */
   const pump = useCallback(async () => {
-    if (running.current) return;
+    if (running.current || conflictRef.current || decidingRef.current) return;
     running.current = true;
     const myEpoch = epoch.current;
     try {
-      while (desired.current !== null && mounted.current && epoch.current === myEpoch) {
+      while (
+        desired.current !== null &&
+        mounted.current &&
+        epoch.current === myEpoch &&
+        !conflictRef.current &&
+        !decidingRef.current
+      ) {
         const text = desired.current;
         const version = editVersion.current;
         desired.current = null;
+        const wait = waitUntil.current - Date.now();
+        if (wait > 0) {
+          // Still inside the server's Retry-After: keep the draft and wait.
+          desired.current = text;
+          setStatus("failed");
+          setMessage(`服务器要求约 ${Math.ceil(wait / 1000)} 秒后再保存；内容仍保留在编辑区。`);
+          scheduleRetry(Math.min(wait, 60_000));
+          return;
+        }
         setStatus("saving");
         setMessage("");
+        setWaitSeconds(0);
         try {
           const value = await api<{ note: NotePayload }>(
             `/api/paper/${encodeURIComponent(paperId)}/reading/note`,
@@ -501,47 +596,99 @@ export function NoteEditor({
           if (epoch.current !== myEpoch || !mounted.current) return;
           revision.current = value.note.revision;
           retries.current = 0;
-          noteDrafts.delete(key);
+          savedText.current = text;
+          onNote({ ...value.note, entries: entries || [], conflicts: value.note.conflicts || [] });
           if (editVersion.current === version) {
-            savedText.current = text;
+            noteDrafts.delete(key);
             setStatus("saved");
           } else {
-            // Newer typing exists: stay honest and keep saving.
+            // Newer typing exists: keep it as the recoverable draft and keep saving.
+            recordLatest(false, value.note.revision);
             setStatus("dirty");
           }
-          onNote({ ...value.note, entries: entries || [], conflicts: [] });
         } catch (e) {
           if (epoch.current !== myEpoch || !mounted.current) return;
           const text2 = String((e as Error).message || e);
+          const retryAfter = (e as { retryAfter?: number | null }).retryAfter ?? null;
           if (/conflict/i.test(text2)) {
-            record(text, false);
-            setMessage("另一个标签或设备也编辑了这篇笔记，正在读取当前版本…");
-            // Load the current note *before* offering the decision, so the
-            // revision the buttons send is the one the user is shown.
-            await onReloadNote?.();
+            const fresh = await onReloadNote?.();
             if (epoch.current !== myEpoch || !mounted.current) return;
-            setStatus("conflict");
+            const theirs = fresh?.markdown ?? note?.markdown ?? "";
+            const pending = (fresh?.conflicts || []).find(
+              (item) => !String(item.currentRevision || "").startsWith("resolved:"),
+            );
+            openConflict({
+              kind: pending ? "server" : "local",
+              id: pending?.id ?? null,
+              mine: draftRef.current,
+              theirs,
+              revision: fresh?.revision ?? null,
+            });
             setMessage("另一个标签或设备也编辑了这篇笔记，请选择要保留的版本。");
             return;
           }
-          // Unknown outcome (timeout after the server committed): look before
-          // retrying so a retry cannot append or overwrite blindly.
+          if (typeof retryAfter === "number" && retryAfter > 0) {
+            // Honour the server's window: keep the newest draft and wait it out.
+            waitUntil.current = Date.now() + retryAfter * 1000;
+            recordLatest(true);
+            setStatus("failed");
+            setWaitSeconds(retryAfter);
+            setMessage(
+              `保存过于频繁，服务器要求约 ${
+                retryAfter >= 60 ? `${Math.ceil(retryAfter / 60)} 分钟` : `${retryAfter} 秒`
+              }后再试；内容仍保留在编辑区。`,
+            );
+            onError?.(text2);
+            scheduleRetry(Math.min(retryAfter * 1000, 60_000));
+            return;
+          }
+          // Unknown outcome (timeout after the server committed): look first.
           try {
             const current = await api<{ note: NotePayload }>(
               `/api/paper/${encodeURIComponent(paperId)}/reading/note`,
             );
-            if (epoch.current === myEpoch && current.note.markdown === text) {
-              revision.current = current.note.revision;
-              savedText.current = text;
-              noteDrafts.delete(key);
-              setStatus("saved");
-              onNote({ ...current.note, entries: entries || [], conflicts: [] });
-              continue;
+            if (epoch.current === myEpoch && mounted.current) {
+              if (current.note.markdown === draftRef.current) {
+                revision.current = current.note.revision;
+                savedText.current = draftRef.current;
+                noteDrafts.delete(key);
+                setStatus("saved");
+                setMessage("");
+                onNote({ ...current.note, entries: entries || [], conflicts: current.note.conflicts || [] });
+                continue;
+              }
+              if (current.note.markdown === text) {
+                // The snapshot committed; any newer text stays recoverable.
+                revision.current = current.note.revision;
+                savedText.current = text;
+                onNote({ ...current.note, entries: entries || [], conflicts: current.note.conflicts || [] });
+                if (editVersion.current !== version) {
+                  recordLatest(false, current.note.revision);
+                  setStatus("dirty");
+                } else {
+                  noteDrafts.delete(key);
+                  setStatus("saved");
+                  setMessage("");
+                }
+                continue;
+              }
+              if (current.note.revision !== revision.current) {
+                // A real, actionable conflict; the base revision is untouched.
+                openConflict({
+                  kind: "local",
+                  id: null,
+                  mine: draftRef.current,
+                  theirs: current.note.markdown,
+                  revision: current.note.revision,
+                });
+                setMessage("这篇笔记已被其他页面修改，请选择要保留的版本。");
+                return;
+              }
             }
           } catch {
-            /* stay in the failed state; the draft is kept either way */
+            /* stay failed; the newest draft is kept either way */
           }
-          record(text, true);
+          recordLatest(true);
           setStatus("failed");
           setMessage(
             retries.current < 3
@@ -552,21 +699,85 @@ export function NoteEditor({
           if (retries.current < 3) {
             retries.current += 1;
             const delay = [3000, 8000, 20000][retries.current - 1] || 20000;
-            if (timer.current) clearTimeout(timer.current);
-            timer.current = setTimeout(() => {
-              desired.current = draftRef.current;
-              void pump();
-            }, delay);
+            scheduleRetry(delay);
           }
           return;
         }
       }
     } finally {
       running.current = false;
-      // Text typed while the last response was in flight still gets saved.
-      if (desired.current !== null && mounted.current && epoch.current === myEpoch) void pump();
+      if (
+        desired.current !== null &&
+        mounted.current &&
+        epoch.current === myEpoch &&
+        !conflictRef.current &&
+        !decidingRef.current
+      ) {
+        void pump();
+      }
     }
-  }, [paperId, key, entries, onNote, onReloadNote, onError, record]);
+  }, [paperId, key, entries, note?.markdown, onNote, onReloadNote, onError, recordLatest, openConflict, scheduleRetry]);
+  const pumpRef = useRef(pump);
+  pumpRef.current = pump;
+
+  useEffect(() => {
+    if (!note || decidingRef.current) return;
+    const pending = conflictRef.current;
+    if (pending) {
+      // A decision taken elsewhere (the panel-level banner, or another entry)
+      // shows up as the conflict record being resolved, or — for a locally
+      // detected divergence — as the note having moved on.
+      const stillPending = pending.id
+        ? (note.conflicts || []).some(
+            (item) =>
+              item.id === pending.id &&
+              !String(item.currentRevision || "").startsWith("resolved:"),
+          )
+        : note.revision === pending.revision;
+      if (stillPending) return;
+      const serverChosen = note.markdown === pending.theirs;
+      const draftChosen = note.markdown === pending.mine;
+      if (!serverChosen && !draftChosen) return;
+      conflictRef.current = null;
+      setConflict(null);
+      setMessage("");
+      if (serverChosen) {
+        revision.current = note.revision;
+        savedText.current = note.markdown;
+        draftRef.current = note.markdown;
+        noteDrafts.delete(key);
+        setDraft(note.markdown);
+        setStatus(note.revision ? "saved" : "idle");
+        return;
+      }
+      // The draft side was applied: adopt it, but keep text typed even later.
+      revision.current = note.revision;
+      savedText.current = note.markdown;
+      if (draftRef.current === note.markdown) {
+        noteDrafts.delete(key);
+        setDraft(note.markdown);
+        setStatus(note.revision ? "saved" : "idle");
+      } else {
+        recordLatest(false, note.revision);
+        setStatus("dirty");
+        desired.current = draftRef.current;
+        void pumpRef.current();
+      }
+      return;
+    }
+    if (draftRef.current !== savedText.current && draftRef.current !== note.markdown) return;
+    if (draftRef.current === note.markdown) {
+      noteDrafts.delete(key);
+      setMessage("");
+    }
+    revision.current = note.revision;
+    savedText.current = note.markdown;
+    draftRef.current = note.markdown;
+    setDraft(note.markdown);
+    onDraftChange?.(note.markdown);
+    setStatus(note.revision ? "saved" : "idle");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note?.revision, note?.paperId, key, recordLatest, conflictState]);
 
   const queue = useCallback(
     (text: string, delayMs = 1200) => {
@@ -575,65 +786,181 @@ export function NoteEditor({
       // next render would snap the textarea back to the last rendered draft.
       setDraft(text);
       draftRef.current = text;
-      record(text, false);
+      onDraftChange?.(text);
+      recordLatest(false);
+      if (conflictRef.current) {
+        // A decision is pending: keep the newest text, but pause auto-submit so
+        // it cannot resolve behind the user's back.
+        conflictRef.current = { ...conflictRef.current, mine: text };
+        setConflict(conflictRef.current);
+        return;
+      }
       setStatus(text === savedText.current ? "saved" : "dirty");
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => {
+        if (conflictRef.current || decidingRef.current) return;
         desired.current = draftRef.current;
-        void pump();
+        void pumpRef.current();
       }, delayMs);
     },
-    [pump, record],
-  );
-
-  /** Look at the server before retrying: a lost response is not a failure. */
-  const reconcile = useCallback(
-    async (text: string): Promise<"saved" | "conflict" | "retry"> => {
-      try {
-        const current = await api<{ note: NotePayload }>(
-          `/api/paper/${encodeURIComponent(paperId)}/reading/note`,
-        );
-        if (current.note.markdown === text) {
-          revision.current = current.note.revision;
-          savedText.current = text;
-          noteDrafts.delete(key);
-          setStatus("saved");
-          setMessage("");
-          onNote({ ...current.note, entries: entries || [], conflicts: [] });
-          return "saved";
-        }
-        if (current.note.revision !== revision.current) {
-          // The note moved on elsewhere: show the real conflict instead of
-          // overwriting text this editor never saw.
-          revision.current = current.note.revision;
-          record(text, false);
-          setStatus("conflict");
-          setMessage("这篇笔记已被其他页面修改，请选择要保留的版本。");
-          await onReloadNote?.();
-          return "conflict";
-        }
-        return "retry";
-      } catch {
-        return "retry";
-      }
-    },
-    [paperId, key, entries, onNote, onReloadNote, record],
+    [recordLatest],
   );
 
   const retryNow = useCallback(async () => {
     retries.current = 0;
     if (timer.current) clearTimeout(timer.current);
-    const outcome = await reconcile(draftRef.current);
-    if (outcome !== "retry") return;
+    if (conflictRef.current) return;
+    const remaining = waitUntil.current - Date.now();
+    if (remaining > 0) {
+      setStatus("failed");
+      setMessage(`服务器要求约 ${Math.ceil(remaining / 1000)} 秒后再保存；内容仍保留在编辑区。`);
+      scheduleRetry(Math.min(remaining, 60_000));
+      return;
+    }
+    // Look at the server before retrying: a lost response is not a failure.
+    try {
+      const current = await api<{ note: NotePayload }>(
+        `/api/paper/${encodeURIComponent(paperId)}/reading/note`,
+      );
+      if (current.note.markdown === draftRef.current) {
+        revision.current = current.note.revision;
+        savedText.current = draftRef.current;
+        noteDrafts.delete(key);
+        setStatus("saved");
+        setMessage("");
+        onNote({ ...current.note, entries: entries || [], conflicts: current.note.conflicts || [] });
+        return;
+      }
+      if (current.note.revision !== revision.current) {
+        const pending = (current.note.conflicts || []).find(
+          (item) => !String(item.currentRevision || "").startsWith("resolved:"),
+        );
+        openConflict({
+          kind: pending ? "server" : "local",
+          id: pending?.id ?? null,
+          mine: draftRef.current,
+          theirs: current.note.markdown,
+          revision: current.note.revision,
+        });
+        setMessage("这篇笔记已被其他页面修改，请选择要保留的版本。");
+        return;
+      }
+    } catch {
+      /* fall through to a normal attempt */
+    }
+    recordLatest(false);
     desired.current = draftRef.current;
-    record(draftRef.current, false);
     void pump();
-  }, [pump, record, reconcile]);
+  }, [paperId, key, entries, onNote, recordLatest, openConflict, pump, scheduleRetry]);
+
+  /**
+   * Apply one side of a pending conflict. Both directions update the editor, the
+   * base revision, the draft registry and the saved state together.
+   */
+  const decide = useCallback(
+    async (choice: "current" | "draft") => {
+      const pending = conflictRef.current;
+      if (!pending || decidingRef.current) return;
+      decidingRef.current = true;
+      setDeciding(true);
+      const myEpoch = epoch.current;
+      const adopt = (value: NotePayload) => {
+        revision.current = value.revision;
+        savedText.current = value.markdown;
+        draftRef.current = value.markdown;
+        noteDrafts.delete(key);
+        setDraft(value.markdown);
+        onDraftChange?.(value.markdown);
+        setStatus(value.revision ? "saved" : "idle");
+        setMessage("");
+        conflictRef.current = null;
+        setConflict(null);
+        onNote({ ...value, entries: entries || [], conflicts: value.conflicts || [] });
+      };
+      try {
+        if (choice === "current") {
+          let resolved: NotePayload | null = null;
+          if (pending.kind === "server" && pending.id) {
+            resolved =
+              (await onResolveConflict?.(pending.id, "current", {
+                revision: pending.revision,
+              })) ?? null;
+          }
+          if (resolved) {
+            adopt(resolved);
+          } else {
+            // No server conflict row (a locally detected divergence): keeping the
+            // server version just means adopting what the user is looking at.
+            const fresh = await onReloadNote?.();
+            if (epoch.current !== myEpoch) return;
+            const theirs = fresh?.markdown ?? pending.theirs;
+            revision.current = fresh?.revision ?? pending.revision;
+            savedText.current = theirs;
+            draftRef.current = theirs;
+            noteDrafts.delete(key);
+            setDraft(theirs);
+            setStatus(revision.current ? "saved" : "idle");
+            setMessage("");
+            conflictRef.current = null;
+            setConflict(null);
+          }
+        } else {
+          const mine = draftRef.current;
+          if (pending.kind === "server" && pending.id) {
+            const resolved = await onResolveConflict?.(pending.id, "draft", {
+              markdown: mine,
+              revision: pending.revision,
+            });
+            if (resolved) {
+              adopt(resolved);
+              return;
+            }
+          }
+          // Locally detected divergence (or the server row is gone): submit the
+          // confirmed text against the revision the user was shown.
+          const value = await api<{ note: NotePayload }>(
+            `/api/paper/${encodeURIComponent(paperId)}/reading/note`,
+            "PUT",
+            { markdown: mine, revision: pending.revision },
+          );
+          if (epoch.current !== myEpoch) return;
+          adopt(value.note);
+        }
+      } catch (e) {
+        if (epoch.current !== myEpoch) return;
+        const text = String((e as Error).message || e);
+        if (/conflict/i.test(text)) {
+          // The note moved again before the decision landed: present the new one.
+          const fresh = await onReloadNote?.();
+          if (epoch.current !== myEpoch) return;
+          const row = (fresh?.conflicts || []).find(
+            (item) => !String(item.currentRevision || "").startsWith("resolved:"),
+          );
+          openConflict({
+            kind: row ? "server" : "local",
+            id: row?.id ?? null,
+            mine: draftRef.current,
+            theirs: fresh?.markdown ?? pending.theirs,
+            revision: fresh?.revision ?? null,
+          });
+          setMessage("在你做决定前这篇笔记又被修改了，请重新选择。");
+        } else {
+          setStatus("failed");
+          setMessage("决定未提交成功，内容仍在编辑区，可以重试。");
+          onError?.(text);
+        }
+      } finally {
+        decidingRef.current = false;
+        if (mounted.current) setDeciding(false);
+      }
+    },
+    [paperId, key, entries, onNote, onReloadNote, onResolveConflict, onError, openConflict],
+  );
 
   // Leaving with unsaved text must be a deliberate choice, never a silent loss.
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
-      if (draftRef.current !== savedText.current) {
+      if (draftRef.current !== savedText.current || conflictRef.current) {
         event.preventDefault();
         event.returnValue = "";
       }
@@ -642,9 +969,6 @@ export function NoteEditor({
     return () => window.removeEventListener("beforeunload", handler);
   }, []);
 
-  const conflict = (note?.conflicts || []).find(
-    (item) => !String(item.currentRevision || "").startsWith("resolved:"),
-  );
   const statusLabel =
     status === "saving"
       ? "保存中…"
@@ -675,14 +999,21 @@ export function NoteEditor({
       {status === "conflict" && conflict && (
         <div className="notice">
           <p>保留哪一份？（两边都会留副本，可随时找回）</p>
+          <div className="note-conflict-compare">
+            <div>
+              <strong>服务器版本</strong>
+              <pre>{conflict.theirs || "（空）"}</pre>
+            </div>
+            <div>
+              <strong>我的草稿</strong>
+              <pre>{conflict.mine}</pre>
+            </div>
+          </div>
           <div className="button-row">
-            <button
-              type="button"
-              onClick={() => void onResolveConflict?.(conflict.id, "current")}
-            >
+            <button type="button" disabled={deciding} onClick={() => void decide("current")}>
               保留服务器版本
             </button>
-            <button type="button" onClick={() => void onResolveConflict?.(conflict.id, "draft")}>
+            <button type="button" disabled={deciding} onClick={() => void decide("draft")}>
               保留我的草稿
             </button>
           </div>
@@ -693,6 +1024,7 @@ export function NoteEditor({
           <button type="button" onClick={() => void retryNow()}>
             重试保存
           </button>
+          {waitSeconds > 0 && <span className="muted">服务器要求等待后再试</span>}
           <button
             type="button"
             onClick={() => {
@@ -721,6 +1053,7 @@ export function NoteEditor({
           placeholder={"写下你的理解…\n\n可以用 Markdown：标题、列表、公式。"}
           onChange={(event) => queue(event.target.value)}
           onBlur={() => {
+            if (conflictRef.current || decidingRef.current) return;
             if (draftRef.current !== savedText.current) {
               if (timer.current) clearTimeout(timer.current);
               desired.current = draftRef.current;
@@ -740,29 +1073,37 @@ export function NoteEditor({
         <details className="note-sources">
           <summary>笔记来源（{entries.length}）</summary>
           <ul>
-            {entries.map((entry) => (
-              <li key={entry.id}>
-                <span>
-                  {entry.kind === "excerpt" ? "摘录" : "已保存的 AI 回答"} ·{" "}
-                  {String((entry.content as any)?.label || "")}
-                </span>
-                {(entry.content as any)?.sources?.map((source: any) => (
-                  <button
-                    key={source.sourceId}
-                    type="button"
-                    onClick={() => onOpenSource?.({ sourceId: source.sourceId, label: source.label })}
-                  >
-                    回访来源 {source.label}
-                    {source.where ? `（${source.where}）` : ""}
-                  </button>
-                ))}
-                {(entry.content as any)?.anchor && (
-                  <span className="muted">
-                    {String((entry.content as any).label || "来源")}
+            {entries.map((entry) => {
+              const content = (entry.content || {}) as Record<string, any>;
+              return (
+                <li key={entry.id}>
+                  <span>
+                    {entry.kind === "excerpt" ? "摘录" : "已保存的 AI 回答"} ·{" "}
+                    {String(content.label || "")}
                   </span>
-                )}
-              </li>
-            ))}
+                  {(entry.kind === "excerpt" && entry.annotationId) || content.anchor ? (
+                    <button
+                      type="button"
+                      onClick={() => void onOpenAnnotation?.(entry.annotationId || "")}
+                    >
+                      回到来源（{String(content.label || "阅读内容")}）
+                    </button>
+                  ) : null}
+                  {content.sources?.map((source: any) => (
+                    <button
+                      key={source.sourceId}
+                      type="button"
+                      onClick={() =>
+                        onOpenSource?.({ sourceId: source.sourceId, label: source.label })
+                      }
+                    >
+                      回访来源 {source.label}
+                      {source.where ? `（${source.where}）` : ""}
+                    </button>
+                  ))}
+                </li>
+              );
+            })}
           </ul>
         </details>
       )}
