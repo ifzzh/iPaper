@@ -578,3 +578,51 @@ def test_stale_versions_keep_the_excerpt_without_navigating(application):
     assert listed["excerpt"] == annotation["excerpt"]  # the record is never dropped
     assert listed["stale"] is True and listed["canNavigate"] is False
     assert listed["notice"]
+
+
+def test_more_than_two_hundred_annotations_stay_reachable(application):
+    """R7: a large paper stays searchable and revisitable through the cursor."""
+    c = application.test_client()
+    token = login(c)
+    headers = {"X-CSRF-Token": token}
+    doc = document(c, token)
+    from ipaper.database.connection import get_db
+    from ipaper.security.identity import Identity, run_as_identity
+
+    with application.app_context():
+        with get_db() as db:
+            owner = db.execute("SELECT owner_id FROM papers WHERE id=?", (OWNER_PAPER,)).fetchone()[0]
+
+        def seed():
+            with get_db() as db:
+                for index in range(205):
+                    db.execute(
+                        "INSERT INTO reading_annotations (id,owner_id,paper_id,document_id,result_id,kind,color,"
+                        "excerpt,comment,anchor_json,context_json,revision,deleted_at,created_at,updated_at)"
+                        " VALUES (?,?,?,?,NULL,'highlight','violet',?,'',?,?,?,NULL,?,?)",
+                        (f"bulk-{index:04d}", owner, OWNER_PAPER, doc["id"],
+                         f"批量摘录 {index}", json.dumps({"mode": "pdf", "page": 1 + (index % 3),
+                                                          "rects": [{"x": .1, "y": .1, "w": .2, "h": .02, "page": 1}]}),
+                         "{}", f"revision-{index}", f"2026-09-22T00:00:{index % 60:02d}+00:00",
+                         f"2026-09-22T00:00:{index % 60:02d}+00:00"),
+                    )
+                db.commit()
+
+        run_as_identity(Identity(owner, "reader_one", "admin"), seed)
+
+    seen, cursor, pages = set(), None, 0
+    while True:
+        url = f"/api/paper/{OWNER_PAPER}/reading/annotations?limit=100"
+        if cursor:
+            url += f"&cursor={cursor}"
+        page = c.get(url).json
+        pages += 1
+        seen.update(item["id"] for item in page["annotations"])
+        cursor = page["nextCursor"]
+        if not cursor or pages > 5:
+            break
+    assert page["total"] == 205
+    assert len(seen) == 205
+    assert pages == 3
+    # The last batch is reachable and keeps its reading-order key.
+    assert all(item["orderKey"] for item in page["annotations"])

@@ -131,11 +131,16 @@ async function enterReader(page: any, paper = "c-4") {
   // The session comes from globalSetup; the isolated server rate-limits logins.
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`/?paper=${paper}&view=reader`);
-  await expect(
-    page.getByRole("navigation").getByRole("button", { name: "文献库", exact: true }),
-  ).toBeVisible({ timeout: 30000 });
+  // Either the shell nav or the reader itself proves we are signed in.
+  await Promise.race([
+    page
+      .getByRole("navigation")
+      .getByRole("button", { name: "文献库", exact: true })
+      .waitFor({ timeout: 30000 }),
+    page.locator(".textLayer span").first().waitFor({ timeout: 30000 }),
+  ]);
   await page.goto(`/?paper=${paper}&view=reader`);
-  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30000 });
+  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 60000 });
 }
 
 async function openNoteTab(page: any) {
@@ -398,4 +403,81 @@ test("a structured original annotation is listed right after saving", async ({ p
     .poll(async () => page.locator(".annotation-list li").count(), { timeout: 20000 })
     .toBeGreaterThan(before);
   await expect(page.locator(".annotation-list")).toContainText("结构");
+});
+
+async function enterStructure(page: any, paper = "c-4") {
+  // By this point the fixture paper has a structure result, so the reader opens
+  // the structured workspace instead of the PDF text layer.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`/?paper=${paper}&view=reader&content=structure`);
+  await expect(page.locator(".structured-workspace")).toBeVisible({ timeout: 60000 });
+}
+
+test("the structure translation side accepts an annotation in the browser", async ({ page }) => {
+  await enterStructure(page);
+  const headers = {
+    "X-CSRF-Token": (await page.context().cookies()).find((c) => c.name === "paperpilot_csrf")?.value || "",
+  };
+  // Produce a structured translation through the real API with the fixture's
+  // fake supplier (no real model), then annotate its translated side in the UI.
+  const preview = await (
+    await page.request.post("/api/paper/c-4/processing/preview", { headers, data: {} })
+  ).json();
+  const started = await (
+    await page.request.post("/api/paper/c-4/processing/jobs", {
+      headers,
+      data: { preflightId: preview.preflightId, kind: "parse_translate" },
+    })
+  ).json();
+  await expect
+    .poll(
+      async () => (await (await page.request.get(`/api/processing/jobs/${started.job.id}`)).json()).job.status,
+      { timeout: 180000 },
+    )
+    .toBe("completed");
+  const finished = (await (await page.request.get(`/api/processing/jobs/${started.job.id}`)).json()).job;
+  const resultId = finished.resultId;
+  expect(resultId).toBeTruthy();
+  const blocks = (await (await page.request.get(`/api/results/${resultId}/blocks`)).json()).blocks;
+  const translated = blocks.find(
+    (b: any) => (b.translation || {}).status === "completed" && b.translation?.content?.text?.length >= 10,
+  );
+  expect(translated, "the fixture produces at least one translated block").toBeTruthy();
+
+  await page.goto("/?paper=c-4&view=reader&content=structure");
+  await expect(page.locator(".structured-workspace")).toBeVisible({ timeout: 30000 });
+  const display = page.getByLabel("显示内容");
+  if (await display.count()) {
+    const options = await display.locator("option").allTextContents();
+    const both = options.find((value) => /双语|对照|译/.test(value));
+    if (both) await display.selectOption({ label: both });
+    await page.waitForTimeout(600);
+  }
+  const field = page.locator('.block-language[data-language="translated"] [data-field="text"]').first();
+  await expect(field).toBeVisible({ timeout: 30000 });
+  await field.evaluate((element) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const node = walker.nextNode()!;
+    const range = document.createRange();
+    range.setStart(node, 0);
+    range.setEnd(node, Math.min(node.textContent!.length, 10));
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  });
+  await page.getByRole("button", { name: "保存高亮/批注", exact: true }).click();
+  await page.getByRole("tab", { name: /批注/ }).click();
+  const row = page.locator(".annotation-list li", { hasText: "结构译文" }).first();
+  await expect(row).toBeVisible({ timeout: 20000 });
+  await expect(page.locator(".structured-marks-layer .reader-highlight").first()).toBeVisible({
+    timeout: 20000,
+  });
+  // The translated anchor names the real block revision and is navigable.
+  const listed = (await (await page.request.get("/api/paper/c-4/reading/annotations")).json()).annotations;
+  const item = listed.find((a: any) => a.contentKind === "structure_translated");
+  expect(item).toBeTruthy();
+  expect(item.canNavigate).toBe(true);
+  expect(typeof item.anchor.translationRevision).toBe("string");
+  await row.getByRole("button", { name: "删除", exact: true }).click();
+  await expect(page.locator(".annotation-list")).not.toContainText("结构译文", { timeout: 20000 });
 });

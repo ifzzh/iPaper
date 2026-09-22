@@ -24,6 +24,14 @@ CONTENT_LABELS = {
     "babeldoc_dual": "版式译文（双语）",
     "babeldoc_mono": "版式译文",
 }
+# How a record's own content kind is shown, independent of the document kind.
+CONTENT_KIND_LABELS = {
+    "pdf_original": "原文 PDF",
+    "pdf_translated": "版式译文",
+    "structure_original": "结构原文",
+    "structure_translated": "结构译文",
+    "page": "页级记录",
+}
 COLORS = {"violet", "blue", "pink", "amber"}
 ANCHOR_MODES = {"pdf", "structure", "page"}
 MAX_EXCERPT = 8_000
@@ -127,12 +135,14 @@ class PaperNotes:
         """Whether the stored source still exists and still says the same thing."""
         anchor = json.loads(row["anchor_json"])
         context = json.loads(row["context_json"] or "{}")
+        kind = context.get("contentKind") or self._content_kind(anchor, context)
         state = {
             "stale": False,
             "canNavigate": True,
             "notice": "",
-            "contentKind": context.get("contentKind") or self._content_kind(anchor, context),
-            "contentLabel": CONTENT_LABELS.get(context.get("documentKind"), "阅读内容"),
+            "contentKind": kind,
+            "contentKindLabel": CONTENT_KIND_LABELS.get(kind, "阅读内容"),
+            "contentLabel": CONTENT_KIND_LABELS.get(kind) or CONTENT_LABELS.get(context.get("documentKind"), "阅读内容"),
             "sourcePage": anchor.get("page"),
             "sourceBlock": anchor.get("blockId"),
             "sourceOrder": context.get("blockOrder"),

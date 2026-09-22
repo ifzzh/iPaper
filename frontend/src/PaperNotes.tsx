@@ -26,6 +26,8 @@ export type Annotation = {
   deleted: boolean;
   stale: boolean;
   canNavigate: boolean;
+  contentKind?: string;
+  contentLabel?: string;
   notice: string;
   createdAt: string;
   updatedAt: string;
@@ -513,9 +515,13 @@ export function NoteEditor({
           const text2 = String((e as Error).message || e);
           if (/conflict/i.test(text2)) {
             record(text, false);
+            setMessage("另一个标签或设备也编辑了这篇笔记，正在读取当前版本…");
+            // Load the current note *before* offering the decision, so the
+            // revision the buttons send is the one the user is shown.
+            await onReloadNote?.();
+            if (epoch.current !== myEpoch || !mounted.current) return;
             setStatus("conflict");
             setMessage("另一个标签或设备也编辑了这篇笔记，请选择要保留的版本。");
-            await onReloadNote?.();
             return;
           }
           // Unknown outcome (timeout after the server committed): look before
@@ -848,12 +854,8 @@ export function AnnotationsPanel({
               <span className="annotation-main">
                 <span className="annotation-excerpt">{annotation.excerpt || "（页级记录）"}</span>
                 <span className="annotation-meta">
-                  {annotation.anchor?.mode === "structure"
-                    ? "结构内容"
-                    : annotation.context?.documentKind === "babeldoc_dual" ||
-                        annotation.context?.documentKind === "babeldoc_mono"
-                      ? "版式译文"
-                      : "原文"}{" "}
+                  {annotation.contentLabel ||
+                    (annotation.anchor?.mode === "structure" ? "结构内容" : "原文")}{" "}
                   ·{" "}
                   {annotation.anchor?.mode === "structure"
                     ? `块 ${annotation.anchor.blockId}`
