@@ -492,6 +492,18 @@ class PaperNotes:
             updated = db.execute("SELECT * FROM reading_annotations WHERE id=?", (annotation_id,)).fetchone()
         return self.public_annotation(dict(updated))
 
+    def annotation(self, paper_id, annotation_id):
+        """One annotation by id, for linking note excerpts back to their source."""
+        with self.store.connection() as db:
+            self._paper(db, paper_id)
+            row = db.execute(
+                "SELECT * FROM reading_annotations WHERE id=? AND owner_id=? AND paper_id=?",
+                (annotation_id, self.store.owner, paper_id),
+            ).fetchone()
+        if row is None:
+            raise ProcessingError("annotation_not_found", 404)
+        return self.public_annotation(dict(row))
+
     def deleted_annotations(self, paper_id, *, limit=PAGE_LIMIT):
         """Recently deleted records, so the UI can offer a clear undo."""
         with self.store.connection() as db:
@@ -633,6 +645,14 @@ class PaperNotes:
         expected = data.get("revision")
         if expected is not None and not isinstance(expected, str):
             raise ProcessingError("invalid_revision")
+        # The text the user actually confirmed in the editor. Without it the
+        # stored conflict snapshot is used (1.13.x clients).
+        confirmed = data.get("markdown")
+        if confirmed is not None:
+            if not isinstance(confirmed, str):
+                raise ProcessingError("invalid_note_markdown")
+            if len(confirmed.encode("utf-8")) > MAX_MARKDOWN:
+                raise ProcessingError("invalid_note_markdown_too_large", 413)
         timestamp = now()
         with self.store.connection(write=True) as db:
             self._paper(db, paper_id)
@@ -645,7 +665,9 @@ class PaperNotes:
             conflict = dict(conflict)
             row = self._note_row(db, paper_id)
             current_revision = row["revision"] if row else None
-            if expected is not None and expected != current_revision:
+            # Strict comparison: null only matches a note that really has no
+            # revision yet; it is never a wildcard that skips the check.
+            if expected != current_revision:
                 # The user decided on a version that is no longer current: keep
                 # the newer text as a recoverable conflict and refuse the stale
                 # decision rather than letting the old draft overwrite it.
@@ -663,7 +685,8 @@ class PaperNotes:
                              "preservedConflictId": replacement, "reason": "stale_decision"},
                 )
             if choice == "draft":
-                if row and row["markdown"] != conflict["markdown"]:
+                wanted = confirmed if confirmed is not None else conflict["markdown"]
+                if row and row["markdown"] != wanted:
                     # Keep the version being replaced, so choosing the draft can
                     # never be the only copy of the other side.
                     db.execute(
@@ -672,17 +695,17 @@ class PaperNotes:
                         (identifier(), self.store.owner, paper_id, row["markdown"],
                          conflict["base_revision"], current_revision or "", timestamp),
                     )
-                revision = fingerprint([paper_id, conflict["markdown"], timestamp])
+                revision = fingerprint([paper_id, wanted, timestamp])
                 if row:
                     db.execute(
                         "UPDATE reading_notes SET markdown=?, revision=?, updated_at=? WHERE owner_id=? AND paper_id=?",
-                        (conflict["markdown"], revision, timestamp, self.store.owner, paper_id),
+                        (wanted, revision, timestamp, self.store.owner, paper_id),
                     )
                 else:
                     db.execute(
                         "INSERT INTO reading_notes (owner_id,paper_id,markdown,revision,created_at,updated_at)"
                         " VALUES (?,?,?,?,?,?)",
-                        (self.store.owner, paper_id, conflict["markdown"], revision, timestamp, timestamp),
+                        (self.store.owner, paper_id, wanted, revision, timestamp, timestamp),
                     )
             # The applied conflict stays recorded (marked with how it was kept)
             # instead of being deleted; other drafts remain available.

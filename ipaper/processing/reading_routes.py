@@ -39,6 +39,10 @@ def attach_reading_routes(bp, service, body, public_job):
     def deleted_annotations(paper_id):
         return jsonify(annotations=notes().deleted_annotations(paper_id))
 
+    @bp.get("/api/paper/<paper_id>/reading/annotations/<annotation_id>")
+    def reading_annotation(paper_id, annotation_id):
+        return jsonify(annotation=notes().annotation(paper_id, annotation_id))
+
     @bp.route("/api/paper/<paper_id>/reading/annotations/<annotation_id>", methods=["PUT", "DELETE"])
     def mutate_annotation(paper_id, annotation_id):
         data = body({"revision", "comment", "color", "excerpt", "restore"})
@@ -73,7 +77,7 @@ def attach_reading_routes(bp, service, body, public_job):
 
     @bp.post("/api/paper/<paper_id>/reading/note/conflicts/<conflict_id>")
     def resolve_note_conflict(paper_id, conflict_id):
-        data = body({"choice", "revision"})
+        data = body({"choice", "revision", "markdown"})
         return jsonify(note=notes().resolve_conflict(paper_id, conflict_id, data))
 
     @bp.get("/api/paper/<paper_id>/reading/note/export.md")

@@ -226,6 +226,18 @@ def _sensitive_rate_policy():
         or path.startswith("/api/import/")
     ):
         return "data_transfer", 20, 3600
+    if request.endpoint in {
+        # Reading-note autosave and the writes in the same flow: a 1.2s debounce
+        # produces tens of saves per minute while typing, so these must not share
+        # the general hourly mutation budget. Owner-scoped, minute-level, bounded.
+        "processing.save_reading_note",
+        "processing.create_annotation",
+        "processing.mutate_annotation",
+        "processing.insert_note_excerpt",
+        "processing.save_note_answer",
+        "processing.resolve_note_conflict",
+    } and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        return "note_writes", 120, 60
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         return "mutation", 60, 3600
     return None

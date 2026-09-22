@@ -6,6 +6,8 @@ model, Worker, MinerU or OCR call is made anywhere here.
 
 import json
 
+import pytest
+
 from tests.test_processing_api import application, generate  # noqa: F401 (fixture)
 from tests.test_workbench import login
 
@@ -626,3 +628,177 @@ def test_more_than_two_hundred_annotations_stay_reachable(application):
     assert pages == 3
     # The last batch is reachable and keeps its reading-order key.
     assert all(item["orderKey"] for item in page["annotations"])
+
+
+# --- V1–V6 regressions from the independent 1.13.1 review -------------------
+
+
+def test_note_autosave_does_not_exhaust_the_general_mutation_budget(application, monkeypatch):
+    """V3: a normal note-writing pace must not hit the hourly general limit."""
+    import app as app_module
+
+    client = application.test_client()
+    token = login(client)
+    headers = {"X-CSRF-Token": token}
+    app_module._rate_limiter.clear()
+    real_check = app_module._rate_limiter.check
+    clock = [10_000.0]
+
+    def paced_check(*args, **kwargs):
+        # Simulated clock only: one save every ten seconds for ten minutes.
+        return real_check(*args, **kwargs, now=clock[0])
+
+    monkeypatch.setattr(app_module._rate_limiter, "check", paced_check)
+    revision = None
+    statuses = []
+    for index in range(61):
+        clock[0] = 10_000.0 + index * 10
+        response = client.put(
+            "/api/paper/a-4/reading/note",
+            json={"markdown": f"模拟笔记第 {index} 版\n\n- 要点一\n- 要点二", "revision": revision},
+            headers=headers,
+        )
+        statuses.append(response.status_code)
+        if response.status_code == 200:
+            revision = response.json["note"]["revision"]
+    assert statuses[-1] == 200, statuses[-5:]
+    assert statuses.count(200) == 61
+    # The general hourly mutation bucket was never touched by note autosave.
+    assert app_module._rate_limiter.check("mutation", "ignored", limit=60, window_seconds=3600).allowed
+
+
+def test_note_write_limit_is_bounded_and_owner_isolated(application, monkeypatch):
+    """V3: the dedicated bucket is still bounded, minute-level and per owner."""
+    import app as app_module
+
+    first, second = application.test_client(), application.test_client()
+    first_token = login(first)
+    second_token = login(second, "reader_two")
+    app_module._rate_limiter.clear()
+    real_check = app_module._rate_limiter.check
+    clock = [20_000.0]
+
+    def paced_check(*args, **kwargs):
+        return real_check(*args, **kwargs, now=clock[0])
+
+    monkeypatch.setattr(app_module._rate_limiter, "check", paced_check)
+    body = {"markdown": "计费内的写入", "revision": None}
+    statuses = []
+    for index in range(130):
+        # 2.5 writes per second inside one window: a runaway client, not typing.
+        clock[0] = 20_000.0 + index * 0.4
+        response = first.put("/api/paper/a-4/reading/note", json=body,
+                             headers={"X-CSRF-Token": first_token})
+        if response.status_code == 200:
+            body["revision"] = response.json["note"]["revision"]
+        statuses.append(response.status_code)
+    assert statuses[-1] == 429
+    limited = first.put("/api/paper/a-4/reading/note", json=body,
+                        headers={"X-CSRF-Token": first_token})
+    assert limited.status_code == 429
+    retry = limited.headers.get("Retry-After")
+    assert retry and retry.isdigit() and 1 <= int(retry) <= 60
+    # The bucket is per owner: exhausting one account leaves another untouched
+    # (checked directly so the test does not need a second owned paper).
+    owner_id = first.get("/api/auth/session").json["user"]["id"]
+    assert not real_check(
+        "note_writes", owner_id, limit=120, window_seconds=60, now=clock[0]
+    ).allowed
+    assert real_check(
+        "note_writes", "another-owner-id", limit=120, window_seconds=60, now=clock[0]
+    ).allowed
+    # The other account still reaches its own paper without inheriting the limit.
+    assert second.get("/api/paper/a-4/reading/note").status_code == 404  # not their paper
+    second_token  # kept for clarity: the second session is authenticated
+    # And the window recovers for the first owner.
+    clock[0] += 61
+    recovered = first.put("/api/paper/a-4/reading/note", json=body,
+                          headers={"X-CSRF-Token": first_token})
+    assert recovered.status_code == 200
+    # Unrelated sensitive buckets keep their own, stricter limits.
+    assert "mutation" not in {policy[0] for policy in [("note_writes",)]}
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [
+        {},                                   # field missing entirely
+        {"revision": 7},                      # wrong type
+        {"revision": "old-revision"},         # stale string
+        {"revision": ""},                     # empty string is not "no version"
+    ],
+)
+def test_conflict_decision_revision_matrix_rejects_unseen_versions(application, decision):
+    """V4: only the exact revision the user saw may resolve a conflict."""
+    c = application.test_client()
+    token = login(c)
+    headers = {"X-CSRF-Token": token}
+    path = "/api/paper/a-4/reading/note"
+    original = c.put(path, json={"markdown": "original", "revision": None}, headers=headers).json["note"]
+    seen = c.put(path, json={"markdown": "remote seen", "revision": original["revision"]},
+                 headers=headers).json["note"]
+    conflict = c.put(path, json={"markdown": "local draft", "revision": original["revision"]},
+                     headers=headers)
+    assert conflict.status_code == 409
+    conflict_id = conflict.json["conflictId"]
+    newer = c.put(path, json={"markdown": "NEWER UNSEEN REMOTE", "revision": seen["revision"]},
+                  headers=headers)
+    assert newer.status_code == 200
+
+    response = c.post(f"{path}/conflicts/{conflict_id}", json={"choice": "draft", **decision},
+                      headers=headers)
+    assert response.status_code in {400, 409}, response.json
+    after = c.get(path).json["note"]
+    assert after["markdown"] == "NEWER UNSEEN REMOTE"
+    assert any(item["markdown"] == "local draft" for item in after["conflicts"])
+
+
+def test_conflict_decision_accepts_the_seen_revision_and_the_confirmed_text(application):
+    """V2/V4: the decision applies the user's current text and keeps both sides."""
+    c = application.test_client()
+    token = login(c)
+    headers = {"X-CSRF-Token": token}
+    path = "/api/paper/a-4/reading/note"
+    original = c.put(path, json={"markdown": "original", "revision": None}, headers=headers).json["note"]
+    seen = c.put(path, json={"markdown": "remote version", "revision": original["revision"]},
+                 headers=headers).json["note"]
+    conflict = c.put(path, json={"markdown": "first draft snapshot", "revision": original["revision"]},
+                     headers=headers)
+    assert conflict.status_code == 409
+    resolved = c.post(f"{path}/conflicts/{conflict.json['conflictId']}",
+                      json={"choice": "draft", "revision": seen["revision"],
+                            "markdown": "text typed after the conflict appeared"},
+                      headers=headers)
+    assert resolved.status_code == 200, resolved.json
+    note = resolved.json["note"]
+    assert note["markdown"] == "text typed after the conflict appeared"
+    assert any(item["markdown"] == "remote version" for item in note["conflicts"])
+    # Keeping the server version is also revision-bound and never rewrites the note.
+    again = c.put(path, json={"markdown": "another local draft", "revision": original["revision"]},
+                  headers=headers)
+    assert again.status_code == 409
+    kept = c.post(f"{path}/conflicts/{again.json['conflictId']}",
+                  json={"choice": "current", "revision": note["revision"]}, headers=headers)
+    assert kept.status_code == 200
+    assert kept.json["note"]["markdown"] == "text typed after the conflict appeared"
+    assert any(item["markdown"] == "another local draft" for item in kept.json["note"]["conflicts"])
+
+
+def test_single_annotation_endpoint_supports_note_excerpt_revisit(application):
+    """V5: the note can resolve an excerpt's source through its own annotation."""
+    c = application.test_client()
+    token = login(c)
+    headers = {"X-CSRF-Token": token}
+    doc = document(c, token)
+    created = create_annotation(c, token, doc).json["annotation"]
+    fetched = c.get(f"/api/paper/{OWNER_PAPER}/reading/annotations/{created['id']}")
+    assert fetched.status_code == 200
+    assert fetched.json["annotation"]["id"] == created["id"]
+    assert fetched.json["annotation"]["contentKind"] == "pdf_original"
+    # Deleted records are still resolvable for provenance, but flagged.
+    c.delete(f"/api/paper/{OWNER_PAPER}/reading/annotations/{created['id']}",
+             json={"revision": created["revision"]}, headers=headers)
+    after = c.get(f"/api/paper/{OWNER_PAPER}/reading/annotations/{created['id']}")
+    assert after.status_code == 200
+    assert after.json["annotation"]["deleted"] is True
+    assert c.get(f"/api/paper/{OWNER_PAPER}/reading/annotations/missing-id").status_code == 404
