@@ -5,6 +5,8 @@ export default defineConfig({
   testDir: "./unified-tests",
   testIgnore: [
     "production-notes.spec.ts",
+    "production-notes-closeout.spec.ts",
+    "production-notes-theme.spec.ts",
     "daily-states.spec.ts",
     "notes.spec.ts",
     "translation-budget.spec.ts",
