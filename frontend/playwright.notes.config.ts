@@ -6,7 +6,11 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   ...base,
   testMatch: "notes.spec.ts",
+  globalSetup: "./unified-tests/notes.setup.ts",
+  fullyParallel: false,
+  workers: 1,
   testIgnore: [],
+  use: { ...(base.use as object), storageState: "/tmp/ipaper-notes-state.json" },
   timeout: 120000,
   webServer: {
     ...(base.webServer as object),

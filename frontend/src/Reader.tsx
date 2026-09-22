@@ -31,6 +31,7 @@ import {
   Search,
 } from "lucide-react";
 import { Chat, type Excerpt } from "./Chat";
+import { StickyNote } from "lucide-react";
 import {
   AnnotationsPanel,
   HighlightOverlay,
@@ -38,7 +39,11 @@ import {
   selectionContext,
   selectionRects,
   useAnnotations,
+  NoteConflictBanner,
+  PageNoteDialog,
+  noteOwner,
   type Annotation,
+  type AnnotationColor,
   type NotePayload,
 } from "./PaperNotes";
 import { api, Modal, Field, Status } from "./ui";
@@ -347,6 +352,7 @@ export function PdfReader({
     [note, setNote] = useState<NotePayload | null>(null),
     [noteError, setNoteError] = useState(""),
     [openedAnnotation, setOpenedAnnotation] = useState<Annotation | null>(null),
+    [pageNote, setPageNote] = useState(false),
     [status, setStatus] = useState("正在加载 PDF…"),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
@@ -793,23 +799,51 @@ export function PdfReader({
     return () => document.removeEventListener("selectionchange", changed);
   }, [paper.id, variant, page, rotation]);
   const notes = useAnnotations(paper.id, identity.identity?.id || null);
-  const loadNote = useCallback(() => {
-    let alive = true;
-    setNoteError("");
-    api<{ note: NotePayload }>(`/api/paper/${encodeURIComponent(paper.id)}/reading/note`)
-      .then((value) => {
-        if (alive) setNote(value.note);
-      })
-      .catch((e) => {
-        if (alive) setNoteError(errorText(e));
-      });
-    return () => {
-      alive = false;
-    };
+  const loadNote = useCallback(async () => {
+    try {
+      const value = await api<{ note: NotePayload }>(
+        `/api/paper/${encodeURIComponent(paper.id)}/reading/note`,
+      );
+      setNote(value.note);
+      setNoteError("");
+      return value.note;
+    } catch (e) {
+      setNoteError(errorText(e));
+      return null;
+    }
   }, [paper.id]);
   useEffect(() => {
     loadNote();
   }, [loadNote]);
+  const resolveNoteConflict = useCallback(
+    async (conflictId: string, choice: "current" | "draft") => {
+      try {
+        const value = await api<{ note: NotePayload }>(
+          `/api/paper/${encodeURIComponent(paper.id)}/reading/note/conflicts/${conflictId}`,
+          "POST",
+          { choice, revision: note?.revision ?? null },
+        );
+        setNote(value.note);
+        setNoteError("");
+      } catch (e) {
+        setNoteError(errorText(e));
+        // The decision was made against a version that moved on: show the
+        // preserved newer content instead of pretending nothing happened.
+        await loadNote();
+      }
+    },
+    [paper.id, note?.revision, loadNote],
+  );
+  const editAnnotation = useCallback(
+    async (annotation: Annotation, values: { comment?: string; color?: AnnotationColor }) => {
+      const updated = await notes.update(annotation.id, {
+        revision: annotation.revision,
+        ...values,
+      });
+      return Boolean(updated);
+    },
+    [notes],
+  );
   useEffect(() => {
     // The chat can insert an answer into this note; refetch so it shows up
     // immediately without polling.
@@ -1062,6 +1096,15 @@ export function PdfReader({
           ))}
         </select>
         <button
+          className="icon-button"
+          aria-label="页级记录"
+          title="这一页没有可选文字时使用页级记录"
+          disabled={!doc}
+          onClick={() => setPageNote(true)}
+        >
+          <StickyNote size={17} />
+        </button>
+        <button
           className="icon-button rotate-button"
           aria-label="旋转"
           title="旋转页面"
@@ -1115,6 +1158,20 @@ export function PdfReader({
             setChat(true);
             setMobileChat(matchMedia("(max-width:640px)").matches);
             setTranslateSelection(null);
+          }}
+        />
+      )}
+      {pageNote && identity.identity && (
+        <PageNoteDialog
+          paperId={paper.id}
+          documentId={identity.identity.id}
+          page={page}
+          pageCount={identity.identity.pageCount || 1}
+          onClose={() => setPageNote(false)}
+          onCreated={() => {
+            void notes.refresh();
+            setPanelTab("annotations");
+            setChat(true);
           }}
         />
       )}
@@ -1389,23 +1446,35 @@ export function PdfReader({
                   </button>
                 ))}
               </div>
+              <NoteConflictBanner
+                note={note}
+                onResolve={resolveNoteConflict}
+                onOpen={() => setPanelTab("note")}
+              />
               {panelTab === "annotations" && (
                 <AnnotationsPanel
                   annotations={notes.items}
                   loading={notes.loading}
                   error={notes.error}
-                  note={note}
                   onRefresh={() => void notes.refresh()}
-                  onNote={setNote}
-                  onError={setNoteError}
+                  onEdit={editAnnotation}
+                  onOpenNote={() => setPanelTab("note")}
+                  onLoadMore={() => void notes.loadMore()}
+                  hasMore={notes.hasMore}
                   onOpen={(annotation) => {
                     setOpenedAnnotation(annotation);
                     if (annotation.canNavigate && annotation.anchor?.mode === "pdf") {
                       jump((annotation.anchor as any).page);
                     }
                   }}
-                  onDelete={(annotation) => void notes.remove(annotation.id, annotation.revision)}
-                  onRestore={(annotation) => void notes.restore(annotation.id, annotation.revision)}
+                  onDelete={async (annotation) => {
+                    const value = await notes.remove(annotation.id, annotation.revision);
+                    return (value as any)?.annotation ?? null;
+                  }}
+                  onRestore={async (annotation) => {
+                    const value = await notes.restore(annotation.id, annotation.revision);
+                    return (value as any)?.annotation ?? null;
+                  }}
                 />
               )}
               {panelTab === "note" && (
@@ -1413,17 +1482,14 @@ export function PdfReader({
                   {noteError && <p className="notice error">{noteError}</p>}
                   <NoteEditor
                     paperId={paper.id}
+                    ownerId={noteOwner()}
                     note={note}
                     onNote={setNote}
                     onError={setNoteError}
-                    onResolveConflict={async (conflictId, choice) => {
-                      const value = await api<{ note: NotePayload }>(
-                        `/api/paper/${encodeURIComponent(paper.id)}/reading/note/conflicts/${conflictId}`,
-                        "POST",
-                        { choice },
-                      );
-                      setNote(value.note);
-                    }}
+                    entries={note?.entries}
+                    onOpenSource={(source) => onSource?.(source.sourceId)}
+                    onReloadNote={loadNote}
+                    onResolveConflict={resolveNoteConflict}
                     onInsertExcerpt={
                       openedAnnotation
                         ? async () => {

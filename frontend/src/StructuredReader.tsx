@@ -43,6 +43,8 @@ import {
 import { MediaBoundary } from "./MediaViewer";
 import {
   ANNOTATION_COLORS,
+  NoteConflictBanner,
+  noteOwner,
   StructuredMarks,
   AnnotationsPanel,
   NoteEditor,
@@ -1094,20 +1096,47 @@ function StructureContent(
       if (alive.current) setError(errorText(e));
     }
   }
-  const notes = useAnnotations(paper.id, result?.id || null);
-  const loadNote = useCallback(() => {
-    let alive = true;
-    void api<{ note: NotePayload }>(`/api/paper/${encodeURIComponent(paper.id)}/reading/note`)
-      .then((value) => {
-        if (alive) setNote(value.note);
-      })
-      .catch((e) => {
-        if (alive) setNoteError(errorText(e));
-      });
-    return () => {
-      alive = false;
-    };
+  const notes = useAnnotations(paper.id, result?.documentId || null);
+  const loadNote = useCallback(async () => {
+    try {
+      const value = await api<{ note: NotePayload }>(
+        `/api/paper/${encodeURIComponent(paper.id)}/reading/note`,
+      );
+      setNote(value.note);
+      setNoteError("");
+      return value.note;
+    } catch (e) {
+      setNoteError(errorText(e));
+      return null;
+    }
   }, [paper.id]);
+  const resolveNoteConflict = useCallback(
+    async (conflictId: string, choice: "current" | "draft") => {
+      try {
+        const value = await api<{ note: NotePayload }>(
+          `/api/paper/${encodeURIComponent(paper.id)}/reading/note/conflicts/${conflictId}`,
+          "POST",
+          { choice, revision: note?.revision ?? null },
+        );
+        setNote(value.note);
+        setNoteError("");
+      } catch (e) {
+        setNoteError(errorText(e));
+        await loadNote();
+      }
+    },
+    [paper.id, note?.revision, loadNote],
+  );
+  const editAnnotation = useCallback(
+    async (annotation: Annotation, values: { comment?: string; color?: AnnotationColor }) => {
+      const updated = await notes.update(annotation.id, {
+        revision: annotation.revision,
+        ...values,
+      });
+      return Boolean(updated);
+    },
+    [notes],
+  );
   useEffect(() => {
     loadNote();
   }, [loadNote]);
@@ -1528,23 +1557,35 @@ function StructureContent(
                   </button>
                 ))}
               </div>
+              <NoteConflictBanner
+                note={note}
+                onResolve={resolveNoteConflict}
+                onOpen={() => setPanelTab("note")}
+              />
               {panelTab === "annotations" && (
                 <AnnotationsPanel
                   annotations={notes.items}
                   loading={notes.loading}
                   error={notes.error}
-                  note={note}
                   onRefresh={() => void notes.refresh()}
-                  onNote={setNote}
-                  onError={setNoteError}
+                  onEdit={editAnnotation}
+                  onOpenNote={() => setPanelTab("note")}
+                  onLoadMore={() => void notes.loadMore()}
+                  hasMore={notes.hasMore}
                   onOpen={(annotation) => {
                     setOpenedAnnotation(annotation);
                     if (annotation.canNavigate && annotation.anchor?.mode === "structure") {
                       void jumpBlock((annotation.anchor as any).blockId);
                     }
                   }}
-                  onDelete={(annotation) => void notes.remove(annotation.id, annotation.revision)}
-                  onRestore={(annotation) => void notes.restore(annotation.id, annotation.revision)}
+                  onDelete={async (annotation) => {
+                    const value = await notes.remove(annotation.id, annotation.revision);
+                    return (value as any)?.annotation ?? null;
+                  }}
+                  onRestore={async (annotation) => {
+                    const value = await notes.restore(annotation.id, annotation.revision);
+                    return (value as any)?.annotation ?? null;
+                  }}
                 />
               )}
               {panelTab === "note" && (
@@ -1552,17 +1593,14 @@ function StructureContent(
                   {noteError && <p className="notice error">{noteError}</p>}
                   <NoteEditor
                     paperId={paper.id}
+                    ownerId={noteOwner()}
                     note={note}
                     onNote={setNote}
                     onError={setNoteError}
-                    onResolveConflict={async (conflictId, choice) => {
-                      const value = await api<{ note: NotePayload }>(
-                        `/api/paper/${encodeURIComponent(paper.id)}/reading/note/conflicts/${conflictId}`,
-                        "POST",
-                        { choice },
-                      );
-                      setNote(value.note);
-                    }}
+                    entries={note?.entries}
+                    onOpenSource={(source) => props.onSource?.(source.sourceId)}
+                    onReloadNote={loadNote}
+                    onResolveConflict={resolveNoteConflict}
                     onInsertExcerpt={
                       openedAnnotation
                         ? async () => {

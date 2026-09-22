@@ -21,6 +21,7 @@ import { Auth } from "./Auth";
 import { Library, type Category } from "./Library";
 import { ImportDialog, Tasks, type LocalTask } from "./Transfers";
 import { api, Status, Markdown, useResource } from "./ui";
+import { clearNoteDrafts, setNoteOwner } from "./PaperNotes";
 import { papers, paperFrom, type Paper, type User, errorText } from "./api";
 import { workspaceRoute, type View } from "./routes";
 import "./style.css";
@@ -126,6 +127,8 @@ function App() {
     controller.current?.abort();
     setUser(null);
     identity.current = null;
+    setNoteOwner("");
+    clearNoteDrafts();
     setItems([]);
     setItemsLoaded(false);
     setTabs([]);
@@ -149,6 +152,7 @@ function App() {
       }
       if (identity.current && identity.current.id !== s.user.id) clear();
       identity.current = s.user;
+      setNoteOwner(s.user.id);
       setUser(s.user);
     } catch (e) {
       if (!c.signal.aborted) setError("无法检查登录状态，请重新加载。");
