@@ -2,6 +2,60 @@ import { test, expect } from "@playwright/test";
 
 // Persistent highlights, annotations, the main note and Markdown export, on the
 // synthetic structured fixture (fake supplier; no real model call).
+test("two browser pages editing one note get a resolvable conflict", async ({ browser, page }) => {
+  await enterReader(page);
+  const second = await browser.newContext({ storageState: "/tmp/ipaper-notes-state.json" });
+  const other = await second.newPage();
+  const baseline = (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note;
+  await page.request.put("/api/paper/c-4/reading/note", {
+    headers: { "X-CSRF-Token": (await page.context().cookies()).find((c) => c.name === "paperpilot_csrf")!.value },
+    data: { markdown: "two page baseline", revision: baseline.revision },
+  });
+  try {
+    for (const target of [page, other]) {
+      await target.setViewportSize({ width: 1440, height: 1000 });
+      await target.goto("/?paper=c-4&view=reader");
+      await expect(target.locator(".textLayer span").first()).toBeVisible({ timeout: 60000 });
+      const tab = target.getByRole("tab", { name: /笔记/ });
+      if (!(await tab.count())) {
+        const toggle = target.getByRole("button", { name: /论文问答/ }).first();
+        if (await toggle.count()) await toggle.click();
+      }
+      await target.getByRole("tab", { name: /笔记/ }).click();
+      await expect(target.locator(".note-textarea")).toHaveValue("two page baseline", { timeout: 20000 });
+    }
+    await page.locator(".note-textarea").fill("A page text");
+    await expect(page.locator(".note-status")).toContainText("已保存", { timeout: 20000 });
+    await other.locator(".note-textarea").fill("B page text");
+    await expect(other.locator(".note-status")).toContainText("待选择", { timeout: 25000 });
+    const keep = other.getByRole("button", { name: "保留我的草稿", exact: true }).first();
+    await expect(keep).toBeVisible({ timeout: 5000 });
+    await keep.click();
+    await expect(other.locator(".note-textarea")).toHaveValue("B page text", { timeout: 20000 });
+    const after = (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note;
+    expect(after.markdown).toBe("B page text");
+    // The other page's text is still recoverable.
+    expect(after.conflicts.some((item: any) => item.markdown.includes("A page text"))).toBe(true);
+  } finally {
+    await second.close();
+  }
+});
+
+test("a page-level record can be written from the reader toolbar", async ({ page }) => {
+  await enterReader(page);
+  await page.getByRole("button", { name: "页级记录", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "页级记录" });
+  await expect(dialog).toBeVisible({ timeout: 20000 });
+  await dialog.getByLabel("页级记录内容").fill("扫描页级记录");
+  await dialog.getByRole("button", { name: "保存页级记录", exact: true }).click();
+  await page.getByRole("tab", { name: /批注/ }).click();
+  const row = page.locator(".annotation-list li", { hasText: "扫描页级记录" });
+  await expect(row).toBeVisible({ timeout: 20000 });
+  await expect(row).toContainText("页级记录");
+  await row.getByRole("button", { name: "删除", exact: true }).click();
+  await expect(page.locator(".annotation-list")).not.toContainText("扫描页级记录", { timeout: 20000 });
+});
+
 test("highlights, annotations and the main note survive a reload", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
