@@ -32,23 +32,26 @@
 
 ## 3. 来源定位与版本
 
-- **PDF（原文与版式译文各自独立）**：保存页号与**归一化行矩形**（相对页面 0–1，且按页面旋转反算到未旋转坐标系），多行逐行记录，不覆盖段间空白或相邻栏。缩放、旋转、适合宽度、窗口变化与虚拟页面卸载重渲染后位置仍然正确。版式译文有自己的 `document_id`/哈希与页码，不套用原文坐标。
-- **结构内容**：保存块、字段（`text`/`caption`/`cell:r:c`）、文字范围与（译文侧）译文修订。不同译文版本或重新解析后，**先按存下的摘录校验当前文本**，不匹配则不画高亮并提示来源已变化，绝不跳到新内容的相似段落。
-- **降级**：扫描件或没有可靠文字层时保存为**页级记录**（`kind=page_note`，无矩形），明确不再声称有精确文字高亮；不自动 OCR。
-- 每条记录都带 `context_json`（文档类型、页数、文档哈希、结果修订、保存时间）；读取时计算 `stale`/`canNavigate`/`notice`：源文件被替换 → 保留摘录但**不自动跳转**并说明原因；结果失效同理。
+- **四类内容各自独立**：原文 PDF、BabelDOC 版式译文、结构原文、结构译文。批注分别绑定到自己的 `document_id`（原文 **或** 译文受控文件，绝不拿原文 PDF 哈希代替译文）、必要时绑定 `result_id`，以及结构侧的块/字段/文字范围与译文修订。创建时后端会核验文档归属、结果与文档的对应关系、块是否存在、字段是否存在、范围是否越界、以及译文修订是否真的是该块当前的修订（字符串 UUID 身份，整数身份仍可读）。
+- **PDF（原文与版式译文各自独立）**：保存页号与**归一化行矩形**（相对页面 0–1，且按页面旋转反算到未旋转坐标系），多行逐行记录，不覆盖段间空白或相邻栏。缩放、旋转、适合宽度、窗口变化与虚拟页面卸载重渲染后位置仍然正确。
+- **结构内容**：绘制前用**完整摘录**与当前文本逐字比较（不是只比开头），并确认译文修订未变化；任一不符就不绘制，并提示来源已变化。重解析、重译、替换源文件后都不会在错误的新版本上画旧标记。
+- **降级**：扫描件或没有可靠文字层时，阅读器工具栏提供**页级记录**入口（页码 + 记录文字，明确说明不含精准选区、不触发 OCR）；服务端也接受无矩形的页级记录。
+- 每条记录带 `context_json`（文档类型与标签、页数、文档哈希、结果修订、译文修订、块顺序、文本长度与哈希、保存时间）。读取时计算 `stale`/`canNavigate`/`notice`/`contentKind`/`sourcePage`/`sourceBlock`/`sourceOrder`：文件被替换 → 保留摘录但**不自动跳转**并说明原因；块消失、范围不再匹配或译文修订变化 → 同样保留摘录、只给块级来源与说明。
 
 ## 4. 自动保存、冲突与离线
 
-- 编辑采用 1.2 秒防抖 + 修订校验：只有服务端确认后才显示「已保存」；失败时内容保留在编辑区并显示原因，恢复后可重试。
-- 两个标签/设备并发编辑：后到的保存不会覆盖先到的内容，服务端把来稿保存为**冲突草稿**并返回 `note_revision_conflict`；界面提示并让用户明确选择「保留服务器版本」或「保留我的草稿」，两者都不会丢。
-- 摘录/回答插入在同一事务内读取-追加-写回，并校验调用方看到的笔记修订；过期修订返回 409，不会吞掉并发加入的内容。
-- 未保存内容不会因为切换页签而写进别的论文：保存请求只针对当前 `paper_id`，切换论文会重新加载（编辑中的内容在切换前会先落盘）。
-- 浏览器不保存可被他人读取的笔记草稿；服务端记录按 owner 隔离。
+**保存与编辑版本绑定。** 编辑器维护单调递增的编辑版本与一个**串行保存泵**：同一时刻只有一个 PUT 在飞；每次编辑只记录"想要的文本"，泵在前一个响应返回后继续发送**最新**文本。响应回来时只有"确认的版本 == 当前编辑版本"才显示「已保存」；否则保持「未保存的修改」并在下一次循环继续保存。旧响应、重复响应以及切换论文/账号后的响应都不会改写新的编辑器（每个请求带论文/账号纪元校验）。
+
+**失败草稿有明确生命周期。** 未提交文本保存在按 `owner + paper` 隔离的会话级草稿表（不写入无边界 localStorage，不落日志）；切换问答/批注/笔记、收起侧栏、切换原文/译文后仍能取回，重新挂载时自动恢复并提示来源。失败给出**明确重试**入口与**有界自动重试**（3 次，3/8/20 秒退避，恢复到该文案才会这样写）。重试前先 GET 对账：若服务器已有完全相同文本，直接确认「已保存」；若服务器修订已前进，转为冲突而不是用旧草稿覆盖。有未保存内容时关闭页面会触发离开提醒；退出登录/会话失效时清空该 owner 的草稿。
+
+**冲突针对所见修订。** 保存遇到 409 时，界面立即重新拉取笔记，展示**服务器当前版本与我的草稿**并给出「保留服务器版本 / 保留我的草稿」按钮（笔记页签和批注面板入口都能操作）。解决请求必须携带用户当时看到的 `revision`：若期间又有第三次写入，服务端拒绝该过期决定（409 `stale_decision`），把未被看过的当前内容保存为**新的冲突副本**，绝不覆盖；选择保留草稿时，被替换的服务器版本也会另存为冲突副本。冲突记录**不会被删除**：应用过的会标记为 `resolved:<choice>`，未决的继续显示在冲突提示里，因此不会出现"声称两边都保留却删掉唯一副本"。
+
+**插入的回答与摘录按身份判重。** 正文里带有不可见的身份标记（`<!-- ipaper:excerpt:<annotationId> -->` / `<!-- ipaper:answer:<hash> -->`），判重基于 `(owner, paper, dedupe_key)` 数据库记录与该标记，而不是正文子串：多行、列表、公式回答重复保存都返回 200 且只保留一份来源记录；同一摘录在正文被手动删除后再插入会恢复正文片段但不新增来源记录；相同文本但不同来源不会互相误判。导出时会剥离这些标记。
 
 ## 5. 接口
 
 ```
-GET    /api/paper/<id>/reading/annotations[?documentId=&kind=&cursor=&limit=]
+GET    /api/paper/<id>/reading/annotations[?documentId=&kind=&cursor=&limit=]  # 分页，nextCursor 为字符串
 POST   /api/paper/<id>/reading/annotations
 PUT    /api/paper/<id>/reading/annotations/<annotation_id>   # {revision, comment?, color?, excerpt?, restore?}
 DELETE /api/paper/<id>/reading/annotations/<annotation_id>   # {revision}
@@ -57,9 +60,11 @@ GET    /api/paper/<id>/reading/note
 PUT    /api/paper/<id>/reading/note                          # {markdown, revision}
 POST   /api/paper/<id>/reading/note/excerpts                 # {annotationId, revision}
 POST   /api/paper/<id>/reading/note/answers                  # {sessionId, messageIndex|messageKey}
-POST   /api/paper/<id>/reading/note/conflicts/<id>           # {choice: current|draft}
+POST   /api/paper/<id>/reading/note/conflicts/<id>           # {choice: current|draft, revision}（必填）
 GET    /api/paper/<id>/reading/note/export.md[?annotations=0]
 ```
+
+列表默认每页 100 条（最大 200），返回 `nextCursor`、`total` 与每条记录的 `orderKey`（文档 → 原文/译文 → 块顺序 → 页 → 创建时间），界面据此按文档内阅读顺序展示并在需要时「加载更多」，因此超过 200 条的批注依然可访问、可搜索、可回访。
 
 错误码：`invalid_anchor` / `invalid_excerpt_too_large` / `invalid_comment_too_large` / `invalid_color` / `invalid_annotation_kind` / `annotation_not_found` / `annotation_revision_conflict` / `annotation_limit_reached` / `invalid_note_markdown_too_large` / `note_revision_conflict` / `answer_not_found` / `answer_not_assistant` / `answer_not_persisted`（流式或未成功保存的回合）/ `conflict_not_found`。
 

@@ -10,7 +10,7 @@
 | 分类、收藏、Reading List、元数据 | `frontend/unified-tests/product.spec.ts`、`tests/test_category_transaction.py` 分类原子保存/虚拟根回归 | 合成用户执行修改；不改写生产论文 |
 | 上传与导入 | `upload.spec.ts`、`import.spec.ts`、`tests/test_import_contract.py`、独立 Document Worker HTTP 验收 | Zotero目标字段、SSE、任务owner、有界后台身份；不放宽归档校验 |
 | Daily、任务、设置与管理员 | `product.spec.ts`、`daily-states.spec.ts`、`account.spec.ts`、`task-history.spec.ts`、`tests/test_daily_asset_identity.py`、`tests/test_daily_asset_processor.py`、`tests/test_daily_scheduler_state.py` | 操作在统一界面，不嵌入旧页；Daily 的 PDF 与封面状态分别显示，缺图可只重生成封面，失败不提前标已读，调度状态可区分线程/启用/本轮/暂停/空闲；变更测试使用合成数据，生产不新建付费任务 |
-| 阅读高亮、批注与单篇笔记 | `tests/test_paper_notes.py`、`frontend/unified-tests/notes.spec.ts`（独立配置 + 合成结构化夹具） | 选中文字保存持久高亮/批注、侧栏回访、每篇一份主笔记自动保存与冲突恢复、保存已有 AI 回答（不重新问模型）、Markdown 导出；按 owner 隔离、来源失效明确降级；缩放/旋转后位置仍对应 |
+| 阅读高亮、批注与单篇笔记 | `tests/test_paper_notes.py`（15 项）、`tests/test_translation_budget.py`（缓存子单元发布与时间保护）、`frontend/unified-tests/notes.spec.ts`（9 项，串行 + 一次登录的合成结构化夹具） | 自动保存与编辑版本绑定（慢响应不覆盖新输入）、失败草稿跨面板恢复/重试/离开提醒、冲突绑定所见修订且双方保留、四类内容（原文 PDF/版式译文/结构原文/结构译文）创建→列表→标记→刷新→回访、批注编辑改色与删除撤销、回答与摘录按身份判重、来源完整回访与分页、页级记录、失效版本安全降级、缩放/旋转后几何对应 |
 | PDF、缩略图、版本与标签 | `session.spec.ts`、`visual.spec.ts`、`position-layout.spec.ts` | 实际 AutoSci 原文/已有译文22页；页码必须与可见页面一致，稳定后保存并在新会话恢复 |
 | 聊天、历史与选区 | `stream.spec.ts`、`product.spec.ts`、`tests/p0_live_chat.py` | 增量UTF-8首行JSON+文本；只进行1次授权真实问答，其余假模型；停止接收不等于服务端取消 |
 | 失败、竞争与安全内容 | `recovery.spec.ts`、流适配单元及恶意载荷回归 | 位置读取失败不覆盖旧值；失效身份清空；Markdown清洗，外部图片不自动加载 |

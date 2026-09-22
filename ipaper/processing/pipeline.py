@@ -621,14 +621,18 @@ class ProcessingPipeline:
                 if block["translation"] and block["translation"]["status"] == "completed" and job["kind"] != "retranslate":
                     completed += 1
                     continue
-                # Real model work is about to happen (or saved units published),
-                # so the execution-time budget applies from here.
-                self.jobs.check(job_id)
                 generation, original = self.store.begin_translation(result_id, block["id"])
                 units = units_for(original)
                 checkpoint_file = self._unit_checkpoint_path(scratch,result_id,block["id"],request)
                 translations = self._unit_checkpoint(scratch,result_id,block["id"],request)
                 pending = [unit for unit in units if unit["id"] not in translations]
+                # The execution-time budget applies to real model work only: a
+                # block whose units are already checkpointed just needs to be
+                # published, which costs no supplier time. Every actual request
+                # still passes `reserve_attempt` -> `check`, so pending work is
+                # guarded exactly as before.
+                if pending:
+                    self.jobs.check(job_id)
                 try:
                     while pending:
                         self._check_source(job["paper_id"],request["sourceSha256"])
@@ -638,7 +642,6 @@ class ProcessingPipeline:
                         if len(content) > 4*1024**2:
                             raise ProcessingError("translation_size_limit")
                         bounded_copy(io.BytesIO(content), checkpoint_file, len(content))
-                    self.jobs.check(job_id)
                     self.store.finish_translation(result_id, block["id"], generation, assemble(original, units, translations), job_id=job_id)
                     completed += 1
                 except ProcessingError as exc:

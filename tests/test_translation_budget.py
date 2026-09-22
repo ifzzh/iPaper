@@ -591,3 +591,83 @@ def test_exhausted_clock_can_still_finish_publishing_saved_work(store, pipeline)
     # model request was needed.
     assert outcome["status"] == "completed", outcome["error"]
     assert outcome["error"] is None
+
+
+def test_exhausted_clock_publishes_completed_unit_checkpoints(store, pipeline, tmp_path, monkeypatch):  # noqa: F811
+    """R8: units are all checkpointed, the block is unpublished, clock is spent.
+
+    The plan and the executor agree that there is no model work left, so the
+    continuation publishes the saved result instead of failing on the clock —
+    while a genuine pending request is still refused.
+    """
+    preview, parsed = publish_scale_structure(store, pipeline, tmp_path, translatable=1, empty=0, pages=1)
+    pipeline.model_factory = ReservingModel
+    job, _ = pipeline.create(
+        "paper",
+        {"kind": "parse_translate", "preflightId": preview["preflightId"], "parseResultId": parsed},
+    )
+    original_finish = store.finish_translation
+    state = {"interrupted": False}
+
+    def stop_after_units(*args, **kwargs):
+        if not kwargs.get("error") and not state["interrupted"]:
+            state["interrupted"] = True
+            raise ProcessingError("model_result_unknown")
+        return original_finish(*args, **kwargs)
+
+    monkeypatch.setattr(store, "finish_translation", stop_after_units)
+    pipeline.run(job["id"])
+    stopped = pipeline.jobs.get(job["id"])
+    assert stopped["status"] == "interrupted", stopped["error"]
+    usage = json.loads(stopped["usage_json"])
+    budget = json.loads(stopped["budget_json"])
+    usage["seconds"] = budget["seconds"]
+    with store.connection(write=True) as db:
+        db.execute("UPDATE processing_jobs SET usage_json=? WHERE id=?", (json.dumps(usage), job["id"]))
+
+    plan = pipeline.resume_plan(job["id"])
+    assert plan["estimate"]["requests"] == 0
+    assert plan["remainingWork"] is False
+    assert plan["sufficient"] is True
+
+    pipeline.resume(job["id"], {"requests": budget["requests"] + 1})
+    pipeline.run(job["id"])
+    finished = pipeline.jobs.get(job["id"])
+    assert finished["status"] == "completed", finished["error"]
+    # Reused checkpoints: no extra supplier request, and usage was not reset.
+    assert json.loads(finished["usage_json"])["requests"] == usage["requests"]
+    assert json.loads(finished["usage_json"])["seconds"] >= 3600
+
+
+def test_pending_work_with_an_exhausted_clock_is_still_refused(store, pipeline, tmp_path):  # noqa: F811
+    """R8 guard: the time limit is not removed for real remaining requests."""
+    preview, parsed = publish_scale_structure(store, pipeline, tmp_path, translatable=2, empty=0, pages=1)
+
+    class StopOnSecond(ReservingModel):
+        calls = 0
+
+        def translate(self, units, language, jobs, job_id):
+            StopOnSecond.calls += 1
+            if StopOnSecond.calls >= 2:
+                raise ProcessingError("model_result_unknown")
+            return super().translate(units, language, jobs, job_id)
+
+    pipeline.model_factory = StopOnSecond
+    job, _ = pipeline.create(
+        "paper",
+        {"kind": "parse_translate", "preflightId": preview["preflightId"], "parseResultId": parsed,
+         "budget": {"requests": 2}},
+    )
+    pipeline.run(job["id"])
+    stopped = pipeline.jobs.get(job["id"])
+    assert stopped["status"] == "interrupted"
+    budget = json.loads(stopped["budget_json"])
+    usage = json.loads(stopped["usage_json"])
+    usage["seconds"] = budget["seconds"]
+    with store.connection(write=True) as db:
+        db.execute("UPDATE processing_jobs SET usage_json=? WHERE id=?", (json.dumps(usage), job["id"]))
+    plan = pipeline.resume_plan(job["id"])
+    assert plan["remainingWork"] is True and plan["sufficient"] is False
+    with pytest.raises(ProcessingError) as raised:
+        pipeline.resume(job["id"], {"requests": budget["requests"] + 1})
+    assert raised.value.code == "budget_time_exhausted"

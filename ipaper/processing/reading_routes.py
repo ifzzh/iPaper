@@ -73,7 +73,7 @@ def attach_reading_routes(bp, service, body, public_job):
 
     @bp.post("/api/paper/<paper_id>/reading/note/conflicts/<conflict_id>")
     def resolve_note_conflict(paper_id, conflict_id):
-        data = body({"choice"})
+        data = body({"choice", "revision"})
         return jsonify(note=notes().resolve_conflict(paper_id, conflict_id, data))
 
     @bp.get("/api/paper/<paper_id>/reading/note/export.md")
