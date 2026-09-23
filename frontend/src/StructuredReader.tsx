@@ -1147,7 +1147,17 @@ function StructureContent(
         return value.note;
       } catch (e) {
         setNoteError(errorText(e));
-        await loadNote();
+        // The decision was made against a version that moved on: show the
+        // preserved newer content and drop the stale capture, so the next
+        // attempt binds to what the server actually holds now.
+        liveNoteConflict.current = null;
+        const fresh = await loadNote();
+        if (fresh?.conflicts?.length) {
+          const pending = (fresh.conflicts || []).find(
+            (item) => !String(item.currentRevision || "").startsWith("resolved:"),
+          );
+          if (pending) liveNoteConflict.current = { id: pending.id, revision: fresh.revision };
+        }
         return null;
       }
     },

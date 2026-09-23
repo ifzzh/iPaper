@@ -1002,7 +1002,7 @@ export function NoteEditor({
       conflict ? { id: conflict.id, revision: conflict.revision } : null,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conflict?.id, conflict?.revision]);
+  }, [conflict?.id, conflict?.revision, conflictState]);
 
   // Self-heal: if the server already holds exactly what the editor shows, it is
   // saved — never report "unsaved" for text the server has (duplicate saves and

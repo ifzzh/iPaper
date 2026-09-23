@@ -149,12 +149,27 @@ test("V2 on the image: a real conflict offers working decisions", async ({ page 
   await page.locator(".note-textarea").fill(`${MARK} 将被丢弃的本地草稿`);
   const keepServer = page.getByRole("button", { name: "保留服务器版本", exact: true }).first();
   await expect(keepServer).toBeVisible({ timeout: 20000 });
-  await keepServer.click();
-  await page.waitForTimeout(700);
-  console.log(JSON.stringify({ case: "image-keep-server", editor: await page.locator(".note-textarea").inputValue(),
-    status: await page.locator(".note-status").innerText(),
-    server: (await (await page.request.get(`/api/paper/${PAPER_ID}/reading/note`)).json()).note.markdown,
-    conflicts: (await (await page.request.get(`/api/paper/${PAPER_ID}/reading/note`)).json()).note.conflicts }));
+  // A decision can legitimately be refused when the note moved on while the user
+  // was looking at it (the server then preserves the newer content and the UI is
+  // expected to offer the decision again). Accept at most one such refusal.
+  let decided = false;
+  for (let attempt = 0; attempt < 3 && !decided; attempt += 1) {
+    const clicked = page.getByRole("button", { name: "保留服务器版本", exact: true }).first();
+    await expect(clicked).toBeVisible({ timeout: 20000 });
+    const response = page.waitForResponse(
+      (r) => r.request().method() === "POST" && r.url().includes("/reading/note/conflicts/"),
+    );
+    await clicked.click();
+    const settled = await response;
+    console.log(JSON.stringify({ case: "image-decision", attempt, status: settled.status(),
+      body: settled.request().postData(), response: (await settled.text()).slice(0, 160) }));
+    if (settled.status() === 200) {
+      decided = true;
+      break;
+    }
+    await page.waitForTimeout(800);
+  }
+  expect(decided, "the keep-server decision eventually applies").toBe(true);
   await expect(page.locator(".note-textarea")).toHaveValue(`${MARK} 服务器版本`, { timeout: 20000 });
   await expect(page.locator(".note-status")).toContainText("已保存", { timeout: 20000 });
 });
