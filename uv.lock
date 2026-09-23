@@ -1740,7 +1740,7 @@ wheels = [
 
 [[package]]
 name = "ipaper"
-version = "1.13.3"
+version = "1.13.4"
 source = { editable = "." }
 dependencies = [
     { name = "argon2-cffi" },

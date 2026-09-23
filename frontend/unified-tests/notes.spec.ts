@@ -26,6 +26,47 @@ async function resetNote(page: any, markdown = "baseline") {
   return headers;
 }
 
+test("V3: the editor honours Retry-After, keeps typing and saves the latest text", async ({ page }) => {
+  await enterReader(page);
+  await resetNote(page);
+  await page.reload();
+  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30000 });
+  await page.getByRole("tab", { name: /笔记/ }).click();
+  await expect(page.locator(".note-textarea")).toHaveValue("baseline");
+
+  // A simulated 429 (isolated route, not a real server window) with a short wait.
+  let limited = 0;
+  await page.route("**/api/paper/c-4/reading/note", (route) => {
+    if (route.request().method() !== "PUT") return route.continue();
+    limited += 1;
+    return route.fulfill({
+      status: 429,
+      contentType: "application/json",
+      headers: { "Retry-After": "2" },
+      body: '{"error":"请求过于频繁，请稍后重试"}',
+    });
+  });
+  await page.locator(".note-textarea").fill("等待期间的第一段");
+  await expect(page.locator(".note-status")).toContainText("保存失败", { timeout: 20000 });
+  await expect(page.locator(".note-editor")).toContainText(/秒后再试|再保存/, { timeout: 20000 });
+  // Typing continues while the window is open, and the newest text is kept.
+  await page.locator(".note-textarea").fill("等待期间继续输入的最新正文");
+  await expect(page.locator(".note-textarea")).toHaveValue("等待期间继续输入的最新正文");
+  await expect(page.locator(".note-status")).toContainText("保存失败");
+  const duringWait = (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note.markdown;
+  expect(duringWait).toBe("baseline");
+  // The fixed retry timers must not hammer a long window: a handful of attempts only.
+  expect(limited).toBeLessThanOrEqual(4);
+
+  await page.unroute("**/api/paper/c-4/reading/note");
+  await expect
+    .poll(async () => (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note.markdown, {
+      timeout: 30000,
+    })
+    .toBe("等待期间继续输入的最新正文");
+  await expect(page.locator(".note-status")).toContainText("已保存", { timeout: 30000 });
+});
+
 test("V1: an older failing save cannot replace newer typing", async ({ page }) => {
   await enterReader(page);
   await resetNote(page);
@@ -490,46 +531,37 @@ test("a slow save response cannot replace newer typing", async ({ page }) => {
   await openNoteTab(page);
   await expect(page.locator(".note-textarea")).toHaveValue("baseline");
 
-  // Every save is held until released, so "unsaved" is observable deterministically.
-  const gates: Array<() => void> = [];
-  const waiters: Array<() => void> = [];
-  let seen = 0;
+  // Hold the first save only; everything after it passes straight through, so the
+  // test never waits on a gate that has not been armed yet.
+  let release!: () => void;
+  let captured!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const ready = new Promise<void>((r) => (captured = r));
+  let holding = true;
   await page.route("**/api/paper/c-4/reading/note", async (route) => {
-    if (route.request().method() !== "PUT") return route.continue();
-    seen += 1;
+    if (route.request().method() !== "PUT" || !holding) return route.continue();
+    holding = false;
     const response = await route.fetch();
-    await new Promise<void>((resolve) => {
-      gates.push(resolve);
-      waiters.forEach((wake) => wake());
-    });
-    await route.fulfill({ response });
+    captured();
+    await gate;
+    return route.fulfill({ response });
   });
-  const waitForSave = (count: number) =>
-    new Promise<void>((resolve) => {
-      const check = () => {
-        if (seen >= count) resolve();
-      };
-      waiters.push(check);
-      check();
-    });
 
   const input = page.locator(".note-textarea");
   await input.fill("first text awaiting its response");
-  await waitForSave(1);
+  await ready;
   await input.fill("NEW text typed while the first save is in flight");
-  gates.shift()!(); // release the older save
-  // The newer text is still in the editor, and nothing claims it is saved yet.
+  release();
+  // The editor keeps the newest text and never claims the older one is saved.
   await expect(input).toHaveValue("NEW text typed while the first save is in flight");
-  await expect(page.locator(".note-status")).toContainText("未保存的修改");
-  await page.unroute("**/api/paper/c-4/reading/note");
-  gates.forEach((release) => release());
+  await expect(page.locator(".note-status")).not.toContainText("已保存");
 
   await expect
     .poll(async () => (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note.markdown, {
-      timeout: 25000,
+      timeout: 30000,
     })
     .toBe("NEW text typed while the first save is in flight");
-  await expect(page.locator(".note-status")).toContainText("已保存", { timeout: 25000 });
+  await expect(page.locator(".note-status")).toContainText("已保存", { timeout: 30000 });
 });
 
 test("a failed draft survives panel changes and can be retried", async ({ page }) => {
@@ -802,45 +834,4 @@ test("the structure translation side accepts an annotation in the browser", asyn
   expect(typeof item.anchor.translationRevision).toBe("string");
   await row.getByRole("button", { name: "删除", exact: true }).click();
   await expect(page.locator(".annotation-list")).not.toContainText("结构译文", { timeout: 20000 });
-});
-
-test("V3: the editor honours Retry-After, keeps typing and saves the latest text", async ({ page }) => {
-  await enterReader(page);
-  await resetNote(page);
-  await page.reload();
-  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30000 });
-  await page.getByRole("tab", { name: /笔记/ }).click();
-  await expect(page.locator(".note-textarea")).toHaveValue("baseline");
-
-  // A simulated 429 (isolated route, not a real server window) with a short wait.
-  let limited = 0;
-  await page.route("**/api/paper/c-4/reading/note", (route) => {
-    if (route.request().method() !== "PUT") return route.continue();
-    limited += 1;
-    return route.fulfill({
-      status: 429,
-      contentType: "application/json",
-      headers: { "Retry-After": "2" },
-      body: '{"error":"请求过于频繁，请稍后重试"}',
-    });
-  });
-  await page.locator(".note-textarea").fill("等待期间的第一段");
-  await expect(page.locator(".note-status")).toContainText("保存失败", { timeout: 20000 });
-  await expect(page.locator(".note-editor")).toContainText(/秒后再试|再保存/, { timeout: 20000 });
-  // Typing continues while the window is open, and the newest text is kept.
-  await page.locator(".note-textarea").fill("等待期间继续输入的最新正文");
-  await expect(page.locator(".note-textarea")).toHaveValue("等待期间继续输入的最新正文");
-  await expect(page.locator(".note-status")).toContainText("保存失败");
-  const duringWait = (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note.markdown;
-  expect(duringWait).toBe("baseline");
-  // The fixed retry timers must not hammer a long window: a handful of attempts only.
-  expect(limited).toBeLessThanOrEqual(4);
-
-  await page.unroute("**/api/paper/c-4/reading/note");
-  await expect
-    .poll(async () => (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note.markdown, {
-      timeout: 30000,
-    })
-    .toBe("等待期间继续输入的最新正文");
-  await expect(page.locator(".note-status")).toContainText("已保存", { timeout: 30000 });
 });

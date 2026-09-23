@@ -458,9 +458,15 @@ export function NoteEditor({
   const running = useRef(false);
   const epoch = useRef(0);
   const retries = useRef(0);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Two independent timers: the debounce arms the next save for the newest text,
+  // the retry arms a bounded re-attempt after a failure. Clearing one must never
+  // cancel the other (a success used to drop the pending debounce with it).
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted = useRef(true);
   const draftRef = useRef("");
+  /** The last markdown the server is known to hold, for duplicate suppression. */
+  const serverText = useRef("");
   const conflictRef = useRef<PendingConflict | null>(null);
   const decidingRef = useRef(false);
   const waitUntil = useRef(0);
@@ -481,7 +487,8 @@ export function NoteEditor({
     retries.current = 0;
     conflictRef.current = null;
     setConflict(null);
-    if (timer.current) clearTimeout(timer.current);
+    if (debounce.current) clearTimeout(debounce.current);
+    if (retryTimer.current) clearTimeout(retryTimer.current);
   }, [key]);
 
   // Adopt the server copy when nothing unsaved is waiting locally, or when the
@@ -538,7 +545,8 @@ export function NoteEditor({
       conflictRef.current = pending;
       setConflict(pending);
       setStatus("conflict");
-      if (timer.current) clearTimeout(timer.current);
+      if (debounce.current) clearTimeout(debounce.current);
+      if (retryTimer.current) clearTimeout(retryTimer.current);
       desired.current = null;
       // Keep the newest text as a recoverable draft; the base revision is NOT
       // advanced, so a later plain save cannot silently skip the decision.
@@ -549,12 +557,17 @@ export function NoteEditor({
 
   const scheduleRetry = useCallback(
     (delayMs: number) => {
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => {
+      if (retryTimer.current) clearTimeout(retryTimer.current);
+      retryTimer.current = setTimeout(() => {
         if (conflictRef.current || decidingRef.current) return;
         // A decision (or a successful save) may have landed meanwhile: never
         // submit a draft that is already the confirmed server text.
         if (draftRef.current === savedText.current) return;
+        if (draftRef.current === serverText.current) {
+          noteDrafts.delete(key);
+          setStatus("saved");
+          return;
+        }
         desired.current = draftRef.current;
         void pumpRef.current();
       }, delayMs);
@@ -563,7 +576,8 @@ export function NoteEditor({
   );
 
   const cancelPendingSave = useCallback(() => {
-    if (timer.current) clearTimeout(timer.current);
+    if (debounce.current) clearTimeout(debounce.current);
+    if (retryTimer.current) clearTimeout(retryTimer.current);
     desired.current = null;
   }, []);
 
@@ -605,7 +619,7 @@ export function NoteEditor({
           revision.current = value.note.revision;
           retries.current = 0;
           savedText.current = text;
-          if (timer.current) clearTimeout(timer.current);
+          if (retryTimer.current) clearTimeout(retryTimer.current);
           if (!mounted.current) {
             // The panel is gone but the draft is not: the base revision must
             // still advance, or the next save would look like a conflict.
@@ -791,6 +805,7 @@ export function NoteEditor({
     }
     revision.current = note.revision;
     savedText.current = note.markdown;
+    serverText.current = note.markdown;
     draftRef.current = note.markdown;
     setDraft(note.markdown);
     onDraftChange?.(note.markdown);
@@ -815,8 +830,8 @@ export function NoteEditor({
         return;
       }
       setStatus(text === savedText.current ? "saved" : "dirty");
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => {
+      if (debounce.current) clearTimeout(debounce.current);
+      debounce.current = setTimeout(() => {
         if (conflictRef.current || decidingRef.current) return;
         desired.current = draftRef.current;
         void pumpRef.current();
@@ -827,7 +842,8 @@ export function NoteEditor({
 
   const retryNow = useCallback(async () => {
     retries.current = 0;
-    if (timer.current) clearTimeout(timer.current);
+    if (debounce.current) clearTimeout(debounce.current);
+    if (retryTimer.current) clearTimeout(retryTimer.current);
     if (conflictRef.current) return;
     const remaining = waitUntil.current - Date.now();
     if (remaining > 0) {
@@ -1076,7 +1092,7 @@ export function NoteEditor({
           onBlur={() => {
             if (conflictRef.current || decidingRef.current) return;
             if (draftRef.current !== savedText.current) {
-              if (timer.current) clearTimeout(timer.current);
+              if (debounce.current) clearTimeout(debounce.current);
               desired.current = draftRef.current;
               void pump();
             }

@@ -590,6 +590,19 @@ class PaperNotes:
             self._paper(db, paper_id)
             row = self._note_row(db, paper_id)
             current = row["revision"] if row else None
+            if row is not None and markdown == row["markdown"]:
+                # The client is re-confirming text the server already holds (a
+                # duplicate or late retry): there is nothing to overwrite, so
+                # answer with the current note instead of manufacturing a
+                # conflict whose two sides are identical.
+                return {
+                    "paperId": paper_id,
+                    "markdown": row["markdown"],
+                    "revision": row["revision"],
+                    "updatedAt": row["updated_at"],
+                    "exists": True,
+                    "duplicate": True,
+                }
             if base != current:
                 # Two writers diverged: commit the incoming draft on this same
                 # connection *before* failing, so the request rolls back the note

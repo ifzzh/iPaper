@@ -802,3 +802,31 @@ def test_single_annotation_endpoint_supports_note_excerpt_revisit(application):
     assert after.status_code == 200
     assert after.json["annotation"]["deleted"] is True
     assert c.get(f"/api/paper/{OWNER_PAPER}/reading/annotations/missing-id").status_code == 404
+
+
+def test_reconfirming_the_current_text_is_not_a_conflict(application):
+    """V1 (image acceptance): a duplicate/late retry of the same text is a no-op.
+
+    The client can legitimately send text the server already holds (a duplicate
+    PUT or a late retry after the panel remounted). That must not manufacture a
+    conflict whose two sides are identical, and it must not rewrite the note.
+    """
+    c = application.test_client()
+    token = login(c)
+    headers = {"X-CSRF-Token": token}
+    path = "/api/paper/a-4/reading/note"
+    original = c.put(path, json={"markdown": "same text", "revision": None}, headers=headers).json["note"]
+    again = c.put(path, json={"markdown": "same text", "revision": original["revision"]}, headers=headers)
+    assert again.status_code == 200
+    assert again.json["note"]["duplicate"] is True
+    assert again.json["note"]["revision"] == original["revision"]
+    assert again.json["note"]["markdown"] == "same text"
+    # A stale base with identical text is still not a conflict (nothing to lose).
+    stale = c.put(path, json={"markdown": "same text", "revision": "old-revision"}, headers=headers)
+    assert stale.status_code == 200
+    note = c.get(path).json["note"]
+    assert note["markdown"] == "same text" and note["conflicts"] == []
+    # Different text with a stale base is still a real conflict.
+    conflict = c.put(path, json={"markdown": "different text", "revision": "old-revision"}, headers=headers)
+    assert conflict.status_code == 409
+    assert any(item["markdown"] == "different text" for item in c.get(path).json["note"]["conflicts"])
