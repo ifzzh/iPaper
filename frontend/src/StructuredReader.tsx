@@ -48,10 +48,13 @@ import {
   StructuredMarks,
   AnnotationsPanel,
   NoteEditor,
+  usePaperNote,
   useAnnotations,
   type Annotation,
   type AnnotationColor,
   type NotePayload,
+  type AnnotationTarget,
+  AnnotationDetail,
 } from "./PaperNotes";
 
 type Cell = { text: string; rowspan: number; colspan: number; header: boolean };
@@ -108,6 +111,8 @@ export function Reader(props: ReaderProps) {
     [sourceError, setSourceError] = useState(""),
     [returnTo, setReturnTo] = useState<string | null>(null);
   const [bookmarkTarget, setBookmarkTarget] = useState<Bookmark | null>(null);
+  const [annotationTarget, setAnnotationTarget] = useState<AnnotationTarget | null>(null);
+  const annotationVisit = useRef(0);
   const [sourceExcerpt, setSourceExcerpt] = useState<any>(null);
   const results = useResource<{
     results: ProcessingResult[];
@@ -119,6 +124,7 @@ export function Reader(props: ReaderProps) {
     navigation = useRef<AbortController | null>(null);
   useEffect(() => {
     if (props.sourceTarget) {
+      setAnnotationTarget(null);
       setSource({
         ...props.sourceTarget,
         document: "original",
@@ -168,11 +174,13 @@ export function Reader(props: ReaderProps) {
     history.replaceState(null, "", url);
   }, [mode, resultId, layoutId]);
   function change(value: string) {
+    setAnnotationTarget(null);
     setSource(null);
     setMode(value);
     if (value !== "structure") props.onVersion(value === "translated");
   }
   async function navigateSource(id: string) {
+    setAnnotationTarget(null);
     navigation.current?.abort();
     const c = new AbortController();
     navigation.current = c;
@@ -224,6 +232,7 @@ export function Reader(props: ReaderProps) {
       return;
     }
     setSource(null);
+    setAnnotationTarget(null);
     setBookmarkTarget(bookmark);
     if (bookmark.resultId) {
       setMode("structure");
@@ -234,6 +243,48 @@ export function Reader(props: ReaderProps) {
         (r) => r.documentId === bookmark.documentId,
       );
       if (layout) setLayoutId(layout.id);
+    }
+  }
+  async function navigateAnnotation(id: string) {
+    navigation.current?.abort();
+    const controller = new AbortController();
+    navigation.current = controller;
+    setSourceError("");
+    try {
+      const { annotation: saved } = await api<{ annotation: Annotation }>(
+        `/api/paper/${encodeURIComponent(props.paper.id)}/reading/annotations/${encodeURIComponent(id)}`,
+        "GET", undefined, controller.signal,
+      );
+      if (controller.signal.aborted || !alive.current) return false;
+      const annotation = saved.deleted ? { ...saved, canNavigate: false,
+        notice: "来源批注已被删除；摘录已保留，定位仅供参考。" } : saved;
+      if (!annotation.canNavigate) {
+        setAnnotationTarget({ annotation, visit: ++annotationVisit.current });
+        return false;
+      }
+      if (annotation.anchor.mode === "structure") {
+        const exact = results.data.results.find(result => result.id === annotation.resultId &&
+          result.documentId === annotation.documentId);
+        if (!exact) {
+          setSourceError("摘录对应的结构版本暂时不可用；摘录已保留，请刷新版本列表后重试。");
+          return false;
+        }
+        setResultId(exact.id);
+        setMode("structure");
+      } else {
+        const translated = annotation.context.documentKind !== "original";
+        const layout = layoutResults.find(result => result.documentId === annotation.documentId);
+        setLayoutId(layout?.id || "");
+        setMode(translated ? "translated" : "original");
+        props.onVersion(translated);
+      }
+      setSource(null);
+      setBookmarkTarget(null);
+      setAnnotationTarget({ annotation, visit: ++annotationVisit.current });
+      return true;
+    } catch (error) {
+      if (!controller.signal.aborted) setSourceError(errorText(error));
+      return false;
     }
   }
   const controls = (
@@ -255,7 +306,7 @@ export function Reader(props: ReaderProps) {
         <select
           aria-label="版式结果版本"
           value={selectedLayout?.id}
-          onChange={(e) => setLayoutId(e.target.value)}
+          onChange={(e) => { setAnnotationTarget(null); setSource(null); setLayoutId(e.target.value); }}
         >
           {layoutResults.map((r) => (
             <option key={r.id} value={r.id}>
@@ -274,6 +325,7 @@ export function Reader(props: ReaderProps) {
       {returnTo && mode !== "structure" && (
         <button
           onClick={() => {
+            setAnnotationTarget(null);
             setSource(null);
             setMode("structure");
             setResultId(returnTo);
@@ -319,7 +371,7 @@ export function Reader(props: ReaderProps) {
               <select
                 aria-label="结构结果版本"
                 value={selected.id}
-                onChange={(e) => setResultId(e.target.value)}
+                onChange={(e) => { setAnnotationTarget(null); setResultId(e.target.value); }}
               >
                 {results.data.results
                   .filter((r) =>
@@ -356,6 +408,8 @@ export function Reader(props: ReaderProps) {
                   : undefined
               }
               onBookmarkNavigate={bookmarkNavigate}
+              annotationTarget={annotationTarget || undefined}
+              onAnnotationNavigate={navigateAnnotation}
             />
           ) : (
             <div className="empty-state">
@@ -378,7 +432,9 @@ export function Reader(props: ReaderProps) {
           toolbarContent={controls}
           sourceTarget={source || undefined}
           fileDocumentId={
-            mode === "translated"
+            annotationTarget?.annotation.canNavigate && annotationTarget.annotation.anchor.mode !== "structure"
+              ? annotationTarget.annotation.documentId
+              : mode === "translated"
               ? source?.documentId || selectedLayout?.documentId
               : undefined
           }
@@ -397,6 +453,8 @@ export function Reader(props: ReaderProps) {
               : undefined
           }
           onBookmarkNavigate={bookmarkNavigate}
+          annotationTarget={annotationTarget || undefined}
+          onAnnotationNavigate={navigateAnnotation}
         />
       )}
       {generate && (
@@ -679,7 +737,6 @@ function StructureContent(
     [excerpt, setExcerpt] = useState<Excerpt | null>(null),
     [selection, setSelection] = useState<any>(null),
     [panelTab, setPanelTab] = useState<"chat" | "annotations" | "note">("chat"),
-    [note, setNote] = useState<NotePayload | null>(null),
     [noteError, setNoteError] = useState(""),
     [openedAnnotation, setOpenedAnnotation] = useState<Annotation | null>(null),
     [annotationState, setAnnotationState] = useState<"idle" | "saving" | "saved" | "failed">("idle"),
@@ -689,6 +746,8 @@ function StructureContent(
     [session, setSession] = useState(""),
     [retryBlock, setRetryBlock] = useState<string | null>(null);
   const sessionRef = useRef(session);
+  const [annotationLocated, setAnnotationLocated] = useState(false);
+  const annotationVisited = useRef<number | null>(null);
   sessionRef.current = session;
   const captureRef = useRef<() => void>(() => {});
   const after = useRef(-1),
@@ -713,7 +772,7 @@ function StructureContent(
         undefined,
         controller.current.signal,
       );
-      if (sequence !== jumpSequence.current || !alive.current) return;
+      if (sequence !== jumpSequence.current || !alive.current) return false;
       if (mode && ["original", "translated", "bilingual"].includes(mode)) {
         heights.current.clear();
         setDisplay(mode as Display);
@@ -731,8 +790,10 @@ function StructureContent(
       setNext(response.nextCursor);
       setScroll(0);
       if (matchMedia("(max-width:900px)").matches) setNavOpen(false);
+      return true;
     } catch (e) {
       if (alive.current) setError(errorText(e));
+      return false;
     }
   }
   useEffect(() => {
@@ -743,6 +804,24 @@ function StructureContent(
         props.bookmarkTarget.location.display,
       );
   }, [props.bookmarkTarget?.id]);
+  useEffect(() => {
+    const target = props.annotationTarget;
+    if (!target || annotationVisited.current === target.visit || restoring.current) return;
+    const annotation = target.annotation;
+    if (annotation.canNavigate && (annotation.anchor.mode !== "structure" || annotation.resultId !== result.id)) return;
+    annotationVisited.current = target.visit;
+    setOpenedAnnotation(annotation);
+    setAnnotationLocated(false);
+    setPanelTab("annotations");
+    setChat(true);
+    if (!annotation.canNavigate) { setNoteError(annotation.notice); return; }
+    if (annotation.anchor.mode === "structure") {
+      setNoteError("");
+      void jumpBlock(annotation.anchor.blockId, 0,
+        annotation.anchor.translationRevision != null ? "translated" : "original")
+        .then(located => { if (alive.current && annotationVisited.current === target.visit) setAnnotationLocated(!!located); });
+    }
+  }, [props.annotationTarget, loading, result.id]);
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   async function translateSelected() {
@@ -1097,102 +1176,15 @@ function StructureContent(
     }
   }
   const notes = useAnnotations(paper.id, result?.documentId || null);
-  const loadNote = useCallback(async () => {
-    try {
-      const value = await api<{ note: NotePayload }>(
-        `/api/paper/${encodeURIComponent(paper.id)}/reading/note`,
-      );
-      setNote(value.note);
-      setNoteError("");
-      return value.note;
-    } catch (e) {
-      setNoteError(errorText(e));
-      return null;
-    }
-  }, [paper.id]);
-  const liveNoteDraft = useRef<string | null>(null);
-  const liveNoteConflict = useRef<{ id: string | null; revision: string | null } | null>(null);
+  const { note, setNote, loadNote, noteSession } = usePaperNote(paper.id);
   const resolveNoteConflict = useCallback(
-    async (
-      conflictId: string | null,
-      choice: "current" | "draft",
-      options?: { markdown?: string; revision?: string | null },
-    ) => {
-      if (!conflictId) return null;
-      try {
-        // The decision must bind to the revision the user was shown: prefer the
-        // one the editor captured, then this page's note, and only fetch when
-        // neither is known.
-        let revision =
-          options?.revision ?? liveNoteConflict.current?.revision ?? note?.revision ?? null;
-        if (revision === null && choice) {
-          const fresh = await loadNote();
-          revision = fresh?.revision ?? null;
-        }
-        const value = await api<{ note: NotePayload }>(
-          `/api/paper/${encodeURIComponent(paper.id)}/reading/note/conflicts/${conflictId}`,
-          "POST",
-          {
-            choice,
-            revision,
-            ...(options?.markdown !== undefined
-              ? { markdown: options.markdown }
-              : choice === "draft" && liveNoteDraft.current
-                ? { markdown: liveNoteDraft.current }
-                : {}),
-          },
-        );
-        setNote(value.note);
-        setNoteError("");
-        return value.note;
-      } catch (e) {
-        setNoteError(errorText(e));
-        // The decision was made against a version that moved on: show the
-        // preserved newer content and drop the stale capture, so the next
-        // attempt binds to what the server actually holds now.
-        liveNoteConflict.current = null;
-        const fresh = await loadNote();
-        if (fresh?.conflicts?.length) {
-          const pending = (fresh.conflicts || []).find(
-            (item) => !String(item.currentRevision || "").startsWith("resolved:"),
-          );
-          if (pending) liveNoteConflict.current = { id: pending.id, revision: fresh.revision };
-        }
-        return null;
-      }
-    },
-    [paper.id, note?.revision, loadNote],
+    (conflictId: string | null, choice: "current" | "draft") =>
+      noteSession.decide(choice, conflictId || undefined),
+    [noteSession],
   );
-  /** Note excerpts link back through the annotation's own controlled source. */
   const openNoteAnnotation = useCallback(
-    async (annotationId: string) => {
-      if (!annotationId) return false;
-      let target = notes.items.find((item) => item.id === annotationId);
-      if (!target) {
-        try {
-          const value = await api<{ annotation: Annotation }>(
-            `/api/paper/${encodeURIComponent(paper.id)}/reading/annotations/${annotationId}`,
-          );
-          target = value.annotation;
-        } catch {
-          setNoteError("这条摘录的来源批注已被删除或不可用；摘录本身已保留。");
-          return false;
-        }
-      }
-      if (target.deleted) {
-        // The excerpt stays; the annotation that produced it is gone.
-        setNoteError("这条摘录的来源批注已被删除；摘录已保留，定位仅供参考。");
-      }
-      setOpenedAnnotation(target);
-      setPanelTab("annotations");
-      if (target.canNavigate && target.anchor?.mode === "structure") {
-        void jumpBlock((target.anchor as any).blockId);
-      } else if (!target.canNavigate) {
-        setNoteError(target.notice || "来源已变化，无法定位到原位置；摘录已保留。");
-      }
-      return true;
-    },
-    [paper.id, notes.items],
+    async (id: string) => (await props.onAnnotationNavigate?.(id)) ?? false,
+    [props.onAnnotationNavigate],
   );
   const editAnnotation = useCallback(
     async (annotation: Annotation, values: { comment?: string; color?: AnnotationColor }) => {
@@ -1562,6 +1554,7 @@ function StructureContent(
             <PdfReader
               {...props}
               embedded
+              annotationTarget={undefined}
               preferences={{ ...props.preferences, thumbnailOpen: false }}
               translated={false}
               sourceTarget={comparison}
@@ -1640,12 +1633,7 @@ function StructureContent(
                   onOpenNote={() => setPanelTab("note")}
                   onLoadMore={() => void notes.loadMore()}
                   hasMore={notes.hasMore}
-                  onOpen={(annotation) => {
-                    setOpenedAnnotation(annotation);
-                    if (annotation.canNavigate && annotation.anchor?.mode === "structure") {
-                      void jumpBlock((annotation.anchor as any).blockId);
-                    }
-                  }}
+                  onOpen={(annotation) => { void openNoteAnnotation(annotation.id); }}
                   onDelete={async (annotation) => {
                     const value = await notes.remove(annotation.id, annotation.revision);
                     return (value as any)?.annotation ?? null;
@@ -1662,20 +1650,8 @@ function StructureContent(
                   <NoteEditor
                     paperId={paper.id}
                     ownerId={noteOwner()}
-                    note={note}
-                    onNote={setNote}
-                    onError={setNoteError}
-                    entries={note?.entries}
                     onOpenSource={(source) => props.onSource?.(source.sourceId)}
-                    onReloadNote={loadNote}
-                    onResolveConflict={resolveNoteConflict}
                     onOpenAnnotation={openNoteAnnotation}
-                    onDraftChange={(text) => {
-                      liveNoteDraft.current = text;
-                    }}
-                    onConflictChange={(value) => {
-                      liveNoteConflict.current = value;
-                    }}
                     onInsertExcerpt={
                       openedAnnotation
                         ? async () => {
@@ -1695,6 +1671,10 @@ function StructureContent(
                     }
                   />
                 </div>
+              )}
+              {openedAnnotation && panelTab === "annotations" && (
+                <AnnotationDetail annotation={openedAnnotation} located={annotationLocated}
+                  onClose={() => setOpenedAnnotation(null)} />
               )}
               {panelTab === "chat" && (
               <Chat

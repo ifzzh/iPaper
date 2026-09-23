@@ -280,13 +280,17 @@ test("V5: an excerpt in the note links back to its source annotation", async ({ 
     data: { annotationId: annotation.id, revision: current.revision },
   });
   expect(inserted.status()).toBe(200);
+  const entryIndex = (await inserted.json()).note.entries.findIndex(
+    (entry: any) => entry.annotationId === annotation.id,
+  );
+  expect(entryIndex).toBeGreaterThanOrEqual(0);
 
   await page.reload();
   await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30000 });
   await page.getByRole("tab", { name: /笔记/ }).click();
   await expect(page.locator(".note-textarea")).toHaveValue(/Synthetic reader validation/);
   await page.locator(".note-sources summary").click();
-  const backlink = page.locator(".note-sources button", { hasText: "回到来源" }).first();
+  const backlink = page.locator(".note-sources li").nth(entryIndex).getByRole("button", { name: /^回到来源/ });
   await expect(backlink).toBeVisible({ timeout: 20000 });
   await backlink.click();
   // The click opens the annotation's own detail and marks it as located.
@@ -302,7 +306,7 @@ test("V5: an excerpt in the note links back to its source annotation", async ({ 
   await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30000 });
   await page.getByRole("tab", { name: /笔记/ }).click();
   await page.locator(".note-sources summary").click();
-  await page.locator(".note-sources button", { hasText: "回到来源" }).first().click();
+  await backlink.click();
   await expect(page.locator(".reader-panel-notice")).toContainText(
     /不可用|已删除|已变化|已保留/,
     { timeout: 20000 },
@@ -631,12 +635,15 @@ test("a failed draft survives panel changes and can be retried", async ({ page }
   );
   await page.locator(".note-textarea").fill("UNSAVED offline text must survive");
   await expect(page.locator(".note-status")).toContainText("保存失败", { timeout: 20000 });
-  await page.unroute("**/api/paper/c-4/reading/note");
 
   await page.getByRole("tab", { name: /问答/ }).click();
   await page.getByRole("tab", { name: /笔记/ }).click();
   await expect(page.locator(".note-textarea")).toHaveValue("UNSAVED offline text must survive");
 
+  // Keep the outage active across the remount. Otherwise the background save
+  // may already have recovered before this manual-retry assertion runs.
+  await expect(page.getByRole("button", { name: "重试保存", exact: true })).toBeVisible();
+  await page.unroute("**/api/paper/c-4/reading/note");
   await page.getByRole("button", { name: "重试保存", exact: true }).click();
   await expect(page.locator(".note-status")).toContainText("已保存", { timeout: 20000 });
   await expect
@@ -784,8 +791,9 @@ test("a structured original annotation is listed right after saving", async ({ p
     )
     .toBe("completed");
 
-  await page.goto("/?paper=c-4&view=reader&content=structure");
+  await page.goto(`/?paper=c-4&view=reader&content=structure&result=${resultId}`);
   await expect(page.locator(".structured-workspace")).toBeVisible({ timeout: 30000 });
+  await page.locator('.structure-subtoolbar').getByRole('button', { name: '原文', exact: true }).click();
   const field = page.locator('.block-language[data-language="original"] [data-field="text"]').first();
   await expect(field).toBeVisible({ timeout: 20000 });
   await field.evaluate((element) => {
@@ -855,15 +863,9 @@ test("the structure translation side accepts an annotation in the browser", asyn
   );
   expect(translated, "the fixture produces at least one translated block").toBeTruthy();
 
-  await page.goto("/?paper=c-4&view=reader&content=structure");
+  await page.goto(`/?paper=c-4&view=reader&content=structure&result=${resultId}`);
   await expect(page.locator(".structured-workspace")).toBeVisible({ timeout: 30000 });
-  const display = page.getByLabel("显示内容");
-  if (await display.count()) {
-    const options = await display.locator("option").allTextContents();
-    const both = options.find((value) => /双语|对照|译/.test(value));
-    if (both) await display.selectOption({ label: both });
-    await page.waitForTimeout(600);
-  }
+  await page.locator('.structure-subtoolbar').getByRole('button', { name: '译文', exact: true }).click();
   const field = page.locator('.block-language[data-language="translated"] [data-field="text"]').first();
   await expect(field).toBeVisible({ timeout: 30000 });
   await field.evaluate((element) => {

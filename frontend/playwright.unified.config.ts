@@ -10,6 +10,7 @@ export default defineConfig({
     "production-notes-v132.spec.ts",
     "daily-states.spec.ts",
     "notes.spec.ts",
+    "notes-reliability.spec.ts",
     "translation-budget.spec.ts",
     "topics-loading.spec.ts",
     "list-loading.spec.ts",

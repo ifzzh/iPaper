@@ -36,6 +36,7 @@ import {
   AnnotationsPanel,
   HighlightOverlay,
   NoteEditor,
+  usePaperNote,
   selectionContext,
   selectionRects,
   useAnnotations,
@@ -44,6 +45,8 @@ import {
   noteOwner,
   type Annotation,
   type AnnotationColor,
+  type AnnotationTarget,
+  AnnotationDetail,
   type NotePayload,
 } from "./PaperNotes";
 import { api, Modal, Field, Status } from "./ui";
@@ -309,6 +312,8 @@ export function PdfReader({
   onCachedTranslation,
   onBookmarkNavigate,
   bookmarkTarget,
+  annotationTarget,
+  onAnnotationNavigate,
 }: {
   preferences: any;
   onPreferences: (v: Record<string, unknown>) => void;
@@ -327,6 +332,8 @@ export function PdfReader({
   onCachedTranslation?: (id: string) => void;
   onBookmarkNavigate?: (bookmark: Bookmark) => void;
   bookmarkTarget?: Bookmark;
+  annotationTarget?: AnnotationTarget;
+  onAnnotationNavigate?: (id: string) => Promise<boolean>;
   fileDocumentId?: string;
   sourceTarget?: {
     id: string;
@@ -349,7 +356,6 @@ export function PdfReader({
     [chat, setChat] = useState(!embedded),
     [mobileChat, setMobileChat] = useState(false),
     [panelTab, setPanelTab] = useState<"chat" | "annotations" | "note">("chat"),
-    [note, setNote] = useState<NotePayload | null>(null),
     [noteError, setNoteError] = useState(""),
     [openedAnnotation, setOpenedAnnotation] = useState<Annotation | null>(null),
     [pageNote, setPageNote] = useState(false),
@@ -364,6 +370,12 @@ export function PdfReader({
     [selection, setSelection] = useState<Excerpt | null>(null),
     [sessionId, setSessionId] = useState("");
   const [pageInput, setPageInput] = useState("1");
+  const [annotationLocated, setAnnotationLocated] = useState(false);
+  const annotationOpenedVisit = useRef<number | null>(null);
+  const annotationLocatedVisit = useRef<number | null>(null);
+  const loadedUrl = useRef("");
+  const renderedPages = useRef(new Set<number>());
+  const annotationDestination = useRef<Annotation | null>(null);
   const [navTab, setNavTab] = useState(
       preferences.navigationPanel || "outline",
     ),
@@ -464,6 +476,8 @@ export function PdfReader({
     const controller = new AbortController();
     let task: ReturnType<typeof getDocument> | undefined;
     setDoc(null);
+    loadedUrl.current = "";
+    renderedPages.current.clear();
     setError("");
     setStatus("正在加载 PDF…");
     setSelection(null);
@@ -548,6 +562,7 @@ export function PdfReader({
       setRotation(initial.rotation);
       setSessionId(initial.sessionId || "");
       setDoc(value);
+      loadedUrl.current = url;
       setStatus("正在渲染…");
       setPasswordNeeded(false);
     })().catch((e) => {
@@ -684,6 +699,32 @@ export function PdfReader({
     )
       jump(bookmarkTarget.location.page, bookmarkTarget.location.offset);
   }, [bookmarkTarget?.id, doc, identity.identity?.id]);
+  useEffect(() => {
+    const target = annotationTarget?.annotation;
+    if (!target) return;
+    // Loading the selected PDF must not reopen the panel after the user has
+    // already moved on to their note. Each click opens it exactly once.
+    if (annotationOpenedVisit.current !== annotationTarget.visit) {
+      annotationOpenedVisit.current = annotationTarget.visit;
+      setOpenedAnnotation(target);
+      setAnnotationLocated(false);
+      annotationDestination.current = null;
+      setPanelTab("annotations");
+      setChat(true);
+    }
+    if (!target.canNavigate) { setNoteError(target.notice); return; }
+    if (!doc || loadedUrl.current !== url || identity.identity?.id !== target.documentId ||
+      target.anchor.mode === "structure") return;
+    if (annotationLocatedVisit.current === annotationTarget.visit) return;
+    const page = target.anchor.page;
+    if (page < 1 || page > doc.numPages) { setNoteError("来源页码不可用；摘录已保留。"); return; }
+    setNoteError("");
+    annotationLocatedVisit.current = annotationTarget.visit;
+    annotationDestination.current = target;
+    const offset = target.anchor.mode === "pdf" ? Math.max(0, (target.anchor.rects[0]?.y || 0) - 0.08) : 0;
+    jump(page, offset);
+    if (renderedPages.current.has(page)) setAnnotationLocated(true);
+  }, [annotationTarget, doc, identity.identity?.id, url]);
   function jump(n: number, offset = 0) {
     if (!doc || !point.current || n < 1 || n > doc.numPages) return;
     const next = { ...point.current, page: n, offset };
@@ -799,113 +840,15 @@ export function PdfReader({
     return () => document.removeEventListener("selectionchange", changed);
   }, [paper.id, variant, page, rotation]);
   const notes = useAnnotations(paper.id, identity.identity?.id || null);
-  const loadNote = useCallback(async () => {
-    try {
-      const value = await api<{ note: NotePayload }>(
-        `/api/paper/${encodeURIComponent(paper.id)}/reading/note`,
-      );
-      setNote(value.note);
-      setNoteError("");
-      return value.note;
-    } catch (e) {
-      setNoteError(errorText(e));
-      return null;
-    }
-  }, [paper.id]);
-  useEffect(() => {
-    loadNote();
-  }, [loadNote]);
-  const liveNoteDraft = useRef<string | null>(null);
-  const liveNoteConflict = useRef<{ id: string | null; revision: string | null } | null>(null);
+  const { note, setNote, loadNote, noteSession } = usePaperNote(paper.id);
   const resolveNoteConflict = useCallback(
-    async (
-      conflictId: string | null,
-      choice: "current" | "draft",
-      options?: { markdown?: string; revision?: string | null },
-    ) => {
-      if (!conflictId) return null;
-      try {
-        // The decision must bind to the revision the user was shown: prefer the
-        // one the editor captured, then this page's note, and only fetch when
-        // neither is known.
-        let revision =
-          options?.revision ?? liveNoteConflict.current?.revision ?? note?.revision ?? null;
-        if (revision === null && choice) {
-          const fresh = await loadNote();
-          revision = fresh?.revision ?? null;
-        }
-        const value = await api<{ note: NotePayload }>(
-          `/api/paper/${encodeURIComponent(paper.id)}/reading/note/conflicts/${conflictId}`,
-          "POST",
-          {
-            choice,
-            revision,
-            ...(options?.markdown !== undefined
-              ? { markdown: options.markdown }
-              : choice === "draft" && liveNoteDraft.current
-                ? { markdown: liveNoteDraft.current }
-                : {}),
-          },
-        );
-        setNote(value.note);
-        setNoteError("");
-        return value.note;
-      } catch (e) {
-        setNoteError(errorText(e));
-        // The decision was made against a version that moved on: show the
-        // preserved newer content and drop the stale capture, so the next
-        // attempt binds to what the server actually holds now.
-        liveNoteConflict.current = null;
-        const fresh = await loadNote();
-        if (fresh?.conflicts?.length) {
-          const pending = (fresh.conflicts || []).find(
-            (item) => !String(item.currentRevision || "").startsWith("resolved:"),
-          );
-          if (pending) liveNoteConflict.current = { id: pending.id, revision: fresh.revision };
-        }
-        return null;
-      }
-    },
-    [paper.id, note?.revision, loadNote],
+    (conflictId: string | null, choice: "current" | "draft") =>
+      noteSession.decide(choice, conflictId || undefined),
+    [noteSession],
   );
-  /** Note excerpts link back through the annotation's own controlled source. */
   const openNoteAnnotation = useCallback(
-    async (annotationId: string) => {
-      if (!annotationId) return false;
-      const known = notes.items.find((item) => item.id === annotationId);
-      let target = known;
-      if (!target) {
-        try {
-          const value = await api<{ annotation: Annotation }>(
-            `/api/paper/${encodeURIComponent(paper.id)}/reading/annotations/${annotationId}`,
-          );
-          target = value.annotation;
-        } catch {
-          setNoteError("这条摘录的来源批注已被删除或不可用；摘录本身已保留。");
-          return false;
-        }
-      }
-      if (target.deleted) {
-        // The excerpt stays; the annotation that produced it is gone.
-        setNoteError("这条摘录的来源批注已被删除；摘录已保留，定位仅供参考。");
-      }
-      setOpenedAnnotation(target);
-      setPanelTab("annotations");
-      setChat(true);
-      if (target.canNavigate && target.anchor?.mode === "pdf") {
-        jump((target.anchor as any).page);
-      } else if (target.canNavigate && target.anchor?.mode === "structure") {
-        // Structure records live in the structured reader; open that view.
-        location.assign(
-          `/?view=reader&paper=${encodeURIComponent(paper.id)}&content=structure`,
-        );
-      }
-      if (!target.canNavigate) {
-        setNoteError(target.notice || "来源已变化，无法定位到原位置；摘录已保留。");
-      }
-      return true;
-    },
-    [paper.id, notes.items],
+    async (id: string) => (await onAnnotationNavigate?.(id)) ?? false,
+    [onAnnotationNavigate],
   );
   const editAnnotation = useCallback(
     async (annotation: Annotation, values: { comment?: string; color?: AnnotationColor }) => {
@@ -1028,6 +971,10 @@ export function PdfReader({
     return () => clearTimeout(timer);
   }, [match, scale, rotation]);
   function pageReady(_n: number) {
+    renderedPages.current.add(_n);
+    const target = annotationDestination.current;
+    if (target && target.anchor.mode !== "structure" && target.anchor.page === _n)
+      setAnnotationLocated(true);
     setStatus("");
     if (_n === match.page) requestAnimationFrame(revealSearch);
   }
@@ -1357,11 +1304,7 @@ export function PdfReader({
                 <PdfPage
                   key={`${doc.fingerprints[0]}-${i}`}
                   annotations={notes.items}
-                  onAnnotationOpen={(annotation) => {
-                    setOpenedAnnotation(annotation);
-                    setPanelTab("annotations");
-                    setChat(true);
-                  }}
+                  onAnnotationOpen={(annotation) => { void openNoteAnnotation(annotation.id); }}
                   doc={doc}
                   number={i + 1}
                   scale={scale}
@@ -1535,12 +1478,7 @@ export function PdfReader({
                   onOpenNote={() => setPanelTab("note")}
                   onLoadMore={() => void notes.loadMore()}
                   hasMore={notes.hasMore}
-                  onOpen={(annotation) => {
-                    setOpenedAnnotation(annotation);
-                    if (annotation.canNavigate && annotation.anchor?.mode === "pdf") {
-                      jump((annotation.anchor as any).page);
-                    }
-                  }}
+                  onOpen={(annotation) => { void openNoteAnnotation(annotation.id); }}
                   onDelete={async (annotation) => {
                     const value = await notes.remove(annotation.id, annotation.revision);
                     return (value as any)?.annotation ?? null;
@@ -1557,20 +1495,8 @@ export function PdfReader({
                   <NoteEditor
                     paperId={paper.id}
                     ownerId={noteOwner()}
-                    note={note}
-                    onNote={setNote}
-                    onError={setNoteError}
-                    entries={note?.entries}
                     onOpenSource={(source) => onSource?.(source.sourceId)}
-                    onReloadNote={loadNote}
-                    onResolveConflict={resolveNoteConflict}
                     onOpenAnnotation={openNoteAnnotation}
-                    onDraftChange={(text) => {
-                      liveNoteDraft.current = text;
-                    }}
-                    onConflictChange={(value) => {
-                      liveNoteConflict.current = value;
-                    }}
                     onInsertExcerpt={
                       openedAnnotation
                         ? async () => {
@@ -1611,30 +1537,8 @@ export function PdfReader({
               />
               )}
               {openedAnnotation && panelTab === "annotations" && (
-                <div className="annotation-detail">
-                  <p>
-                    <strong>{openedAnnotation.excerpt || "（页级记录）"}</strong>
-                  </p>
-                  {openedAnnotation.comment && <p>{openedAnnotation.comment}</p>}
-                  <p className="muted">
-                    {openedAnnotation.canNavigate
-                      ? "已定位到来源；缩放、旋转后位置仍然对应。"
-                      : openedAnnotation.notice ||
-                        "来源不可用或已变化，不会跳到别的内容。"}
-                  </p>
-                  {openedAnnotation.anchor?.mode === "structure" && (
-                    <button
-                      onClick={() => {
-                        location.assign(
-                          `/?view=reader&paper=${encodeURIComponent(paper.id)}&content=structure`,
-                        );
-                      }}
-                    >
-                      在结构阅读中打开
-                    </button>
-                  )}
-                  <button onClick={() => setOpenedAnnotation(null)}>关闭详情</button>
-                </div>
+                <AnnotationDetail annotation={openedAnnotation} located={annotationLocated}
+                  onClose={() => setOpenedAnnotation(null)} />
               )}
             </section>
           </>
