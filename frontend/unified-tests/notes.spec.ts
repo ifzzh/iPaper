@@ -311,6 +311,63 @@ test("V5: an excerpt in the note links back to its source annotation", async ({ 
   await expect(page.locator(".note-textarea")).toHaveValue(/Synthetic reader validation/);
 });
 
+test("V2: the panel-level conflict banner resolves with the revision the editor saw", async ({ page }) => {
+  await enterReader(page);
+  const headers = await resetNote(page);
+  await page.reload();
+  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30000 });
+  await page.getByRole("tab", { name: /笔记/ }).click();
+  await expect(page.locator(".note-textarea")).toHaveValue("baseline");
+
+  const initial = (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note;
+  await page.request.put("/api/paper/c-4/reading/note", {
+    headers,
+    data: { markdown: "REMOTE for the banner decision", revision: initial.revision },
+  });
+  await page.locator(".note-textarea").fill("LOCAL draft decided from the banner");
+  await expect(page.locator(".note-status")).toContainText("待选择", { timeout: 20000 });
+  // Open the annotations tab: the note editor unmounts, so only the panel-level
+  // banner can carry out the decision.
+  await page.getByRole("tab", { name: /批注/ }).click();
+  const banner = page.locator(".note-conflict-banner");
+  await expect(banner).toBeVisible({ timeout: 20000 });
+  const response = page.waitForResponse(
+    (r) => r.request().method() === "POST" && r.url().includes("/reading/note/conflicts/"),
+  );
+  await banner.getByRole("button", { name: "保留我的草稿", exact: true }).click();
+  expect((await response).status()).toBe(200);
+  const after = (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note;
+  expect(after.markdown).toBe("LOCAL draft decided from the banner");
+  expect(after.conflicts.some((item: any) => item.markdown.includes("REMOTE for the banner decision"))).toBe(
+    true,
+  );
+  // Back in the note tab the editor shows the decided text and reports it saved.
+  await page.getByRole("tab", { name: /笔记/ }).click();
+  await expect(page.locator(".note-textarea")).toHaveValue("LOCAL draft decided from the banner", {
+    timeout: 20000,
+  });
+  await expect(page.locator(".note-status")).toContainText("已保存", { timeout: 20000 });
+});
+
+test("V1: text the server already holds is never reported as unsaved", async ({ page }) => {
+  await enterReader(page);
+  const headers = await resetNote(page);
+  await page.reload();
+  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30000 });
+  await page.getByRole("tab", { name: /笔记/ }).click();
+  const seen = (await (await page.request.get("/api/paper/c-4/reading/note")).json()).note;
+  // Another writer stores exactly the text this editor already shows.
+  await page.request.put("/api/paper/c-4/reading/note", {
+    headers,
+    data: { markdown: seen.markdown, revision: seen.revision },
+  });
+  await page.getByRole("tab", { name: /问答/ }).click();
+  await page.getByRole("tab", { name: /笔记/ }).click();
+  await expect(page.locator(".note-textarea")).toHaveValue(seen.markdown, { timeout: 20000 });
+  await expect(page.locator(".note-status")).toContainText(/已保存|尚无笔记/, { timeout: 20000 });
+  await expect(page.locator(".note-status")).not.toContainText("未保存");
+});
+
 test("two browser pages editing one note get a resolvable conflict", async ({ browser, page }) => {
   await enterReader(page);
   const second = await browser.newContext({ storageState: "/tmp/ipaper-notes-state.json" });

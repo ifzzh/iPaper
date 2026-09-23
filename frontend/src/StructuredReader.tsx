@@ -1111,6 +1111,7 @@ function StructureContent(
     }
   }, [paper.id]);
   const liveNoteDraft = useRef<string | null>(null);
+  const liveNoteConflict = useRef<{ id: string | null; revision: string | null } | null>(null);
   const resolveNoteConflict = useCallback(
     async (
       conflictId: string | null,
@@ -1119,12 +1120,21 @@ function StructureContent(
     ) => {
       if (!conflictId) return null;
       try {
+        // The decision must bind to the revision the user was shown: prefer the
+        // one the editor captured, then this page's note, and only fetch when
+        // neither is known.
+        let revision =
+          options?.revision ?? liveNoteConflict.current?.revision ?? note?.revision ?? null;
+        if (revision === null && choice) {
+          const fresh = await loadNote();
+          revision = fresh?.revision ?? null;
+        }
         const value = await api<{ note: NotePayload }>(
           `/api/paper/${encodeURIComponent(paper.id)}/reading/note/conflicts/${conflictId}`,
           "POST",
           {
             choice,
-            revision: options?.revision ?? note?.revision ?? null,
+            revision,
             ...(options?.markdown !== undefined
               ? { markdown: options.markdown }
               : choice === "draft" && liveNoteDraft.current
@@ -1652,6 +1662,9 @@ function StructureContent(
                     onOpenAnnotation={openNoteAnnotation}
                     onDraftChange={(text) => {
                       liveNoteDraft.current = text;
+                    }}
+                    onConflictChange={(value) => {
+                      liveNoteConflict.current = value;
                     }}
                     onInsertExcerpt={
                       openedAnnotation

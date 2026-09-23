@@ -415,6 +415,7 @@ export function NoteEditor({
   onResolveConflict,
   onOpenAnnotation,
   onDraftChange,
+  onConflictChange,
   onError,
 }: {
   paperId: string;
@@ -433,6 +434,8 @@ export function NoteEditor({
   onOpenAnnotation?: (annotationId: string) => Promise<boolean> | boolean;
   /** Lets the panel-level conflict entry use the text the editor holds now. */
   onDraftChange?: (text: string | null) => void;
+  /** Lets the panel-level conflict entry use the revision the editor displayed. */
+  onConflictChange?: (value: { id: string | null; revision: string | null } | null) => void;
   onError?: (message: string) => void;
 }) {
   const key = noteDraftKey(ownerId, paperId);
@@ -993,6 +996,28 @@ export function NoteEditor({
     },
     [paperId, key, entries, onNote, onReloadNote, onResolveConflict, onError, openConflict, cancelPendingSave],
   );
+
+  useEffect(() => {
+    onConflictChange?.(
+      conflict ? { id: conflict.id, revision: conflict.revision } : null,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conflict?.id, conflict?.revision]);
+
+  // Self-heal: if the server already holds exactly what the editor shows, it is
+  // saved — never report "unsaved" for text the server has (duplicate saves and
+  // late responses used to leave the status stale).
+  useEffect(() => {
+    if (!note || conflictRef.current || decidingRef.current) return;
+    if (draftRef.current === "" || draftRef.current !== note.markdown) return;
+    if (savedText.current === note.markdown) return;
+    savedText.current = note.markdown;
+    serverText.current = note.markdown;
+    revision.current = note.revision;
+    noteDrafts.delete(key);
+    setStatus(note.revision ? "saved" : "idle");
+    setMessage("");
+  }, [note?.markdown, note?.revision, key]);
 
   // Leaving with unsaved text must be a deliberate choice, never a silent loss.
   useEffect(() => {
