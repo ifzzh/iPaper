@@ -552,12 +552,20 @@ export function NoteEditor({
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => {
         if (conflictRef.current || decidingRef.current) return;
+        // A decision (or a successful save) may have landed meanwhile: never
+        // submit a draft that is already the confirmed server text.
+        if (draftRef.current === savedText.current) return;
         desired.current = draftRef.current;
         void pumpRef.current();
       }, delayMs);
     },
     [],
   );
+
+  const cancelPendingSave = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    desired.current = null;
+  }, []);
 
   /** Serialised save pump: one PUT at a time, the newest text wins. */
   const pump = useCallback(async () => {
@@ -593,10 +601,20 @@ export function NoteEditor({
             "PUT",
             { markdown: text, revision: revision.current },
           );
-          if (epoch.current !== myEpoch || !mounted.current) return;
+          if (epoch.current !== myEpoch) return;
           revision.current = value.note.revision;
           retries.current = 0;
           savedText.current = text;
+          if (timer.current) clearTimeout(timer.current);
+          if (!mounted.current) {
+            // The panel is gone but the draft is not: the base revision must
+            // still advance, or the next save would look like a conflict.
+            const stored = noteDrafts.get(key);
+            if (stored && stored.markdown !== value.note.markdown) {
+              noteDrafts.set(key, { ...stored, baseRevision: value.note.revision, failed: false });
+            }
+            return;
+          }
           onNote({ ...value.note, entries: entries || [], conflicts: value.note.conflicts || [] });
           if (editVersion.current === version) {
             noteDrafts.delete(key);
@@ -742,6 +760,7 @@ export function NoteEditor({
       setConflict(null);
       setMessage("");
       if (serverChosen) {
+        cancelPendingSave();
         revision.current = note.revision;
         savedText.current = note.markdown;
         draftRef.current = note.markdown;
@@ -865,6 +884,7 @@ export function NoteEditor({
       setDeciding(true);
       const myEpoch = epoch.current;
       const adopt = (value: NotePayload) => {
+        cancelPendingSave();
         revision.current = value.revision;
         savedText.current = value.markdown;
         draftRef.current = value.markdown;
@@ -894,6 +914,7 @@ export function NoteEditor({
             const fresh = await onReloadNote?.();
             if (epoch.current !== myEpoch) return;
             const theirs = fresh?.markdown ?? pending.theirs;
+            cancelPendingSave();
             revision.current = fresh?.revision ?? pending.revision;
             savedText.current = theirs;
             draftRef.current = theirs;
@@ -954,7 +975,7 @@ export function NoteEditor({
         if (mounted.current) setDeciding(false);
       }
     },
-    [paperId, key, entries, onNote, onReloadNote, onResolveConflict, onError, openConflict],
+    [paperId, key, entries, onNote, onReloadNote, onResolveConflict, onError, openConflict, cancelPendingSave],
   );
 
   // Leaving with unsaved text must be a deliberate choice, never a silent loss.
