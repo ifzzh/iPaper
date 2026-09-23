@@ -105,6 +105,10 @@ test("V1 on the image: typing during a slow save survives and wins", async ({ pa
       timeout: 30000,
     })
     .toBe(`${MARK} B 最新文本\n\n- 要点一\n- 要点二\n\n第二段中文。`);
+  const noteNow = (await (await page.request.get(`/api/paper/${PAPER_ID}/reading/note`)).json()).note;
+  console.log(JSON.stringify({ case: "image-v1", editor: await page.locator(".note-textarea").inputValue(),
+    status: await page.locator(".note-status").innerText(), server: noteNow.markdown,
+    revision: noteNow.revision, conflicts: noteNow.conflicts.map((c: any) => ({ base: c.baseRevision, current: c.currentRevision, markdown: c.markdown })) }));
   await expect(page.locator(".note-status")).toContainText("已保存", { timeout: 30000 });
 });
 

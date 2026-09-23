@@ -7,6 +7,7 @@ export default defineConfig({
     "production-notes.spec.ts",
     "production-notes-closeout.spec.ts",
     "production-notes-theme.spec.ts",
+    "production-notes-v132.spec.ts",
     "daily-states.spec.ts",
     "notes.spec.ts",
     "translation-budget.spec.ts",
