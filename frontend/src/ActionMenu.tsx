@@ -15,7 +15,7 @@ export function ActionMenu({label,actions}:{label:string;actions:Action[]}){
  const close=()=>{setOpen(false);trigger.current?.focus();};
  return <><button ref={trigger} className="icon-button action-menu-trigger" aria-label={label} title={label} aria-expanded={open} aria-haspopup="menu" aria-controls={open?id:undefined} onClick={()=>setOpen(v=>!v)} onKeyDown={e=>{if(e.key==='ArrowDown'){e.preventDefault();setOpen(true);}}}><Ellipsis size={18}/></button>
  {open&&createPortal(<div ref={menu} id={id} role="menu" aria-label={label} className="action-menu" onKeyDown={e=>{
-  if(e.key==='Escape'){e.preventDefault();close();return;}if(e.key==='Tab'){setOpen(false);return;}
+  if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();return;}if(e.key==='Tab'){setOpen(false);return;}
   const buttons=Array.from(menu.current!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));let index=buttons.indexOf(document.activeElement as HTMLButtonElement);
   if(!buttons.length)return;
   if(e.key==='ArrowDown')index=(index+1)%buttons.length;else if(e.key==='ArrowUp')index=(index+buttons.length-1)%buttons.length;else if(e.key==='Home')index=0;else if(e.key==='End')index=buttons.length-1;else return;e.preventDefault();buttons[index]?.focus();

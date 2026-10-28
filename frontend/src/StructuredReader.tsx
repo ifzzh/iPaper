@@ -319,12 +319,13 @@ export function Reader(props: ReaderProps) {
           ))}
         </select>
       )}
-      <button onClick={() => setGenerate(true)}>
+      <button aria-label="生成翻译" onClick={() => setGenerate(true)}>
         <Languages size={16} />
         <span>生成翻译</span>
       </button>
       {returnTo && mode !== "structure" && (
         <button
+          aria-label="返回结构内容"
           onClick={() => {
             setAnnotationTarget(null);
             setSource(null);

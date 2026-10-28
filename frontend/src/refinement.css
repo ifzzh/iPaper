@@ -174,3 +174,4 @@
 .app-shell .topic-row .topic-folder {position:absolute;left:24px;top:50%;transform:translateY(-50%);width:20px;height:24px;padding:2px;min-height:0;border:0;background:transparent;color:var(--faint);justify-content:center}
 .app-shell .topic-row .topic-folder:hover,.app-shell .topic-row .topic-folder:focus-visible {background:var(--surface);color:var(--accent)}
 @media(hover:none){.app-shell .paper-row>input[type=checkbox]{opacity:1}}
+@media(max-width:900px){.app-shell .reader-toolbar{flex-wrap:wrap}.app-shell .reader-tools-start{flex-wrap:wrap}.app-shell .reader-page-controls{order:3;margin:3px auto 1px}}

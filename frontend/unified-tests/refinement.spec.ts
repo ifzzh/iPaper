@@ -10,6 +10,11 @@ test('touch library keeps selection discoverable and work surfaces inside the vi
   for(const selector of ['.library-list-panel','.scope-tabs','.list-toolbar','.paper-row']){
    const rect=await page.locator(selector).first().boundingBox();expect(rect).not.toBeNull();expect(rect!.x).toBeGreaterThanOrEqual(0);expect(rect!.x+rect!.width).toBeLessThanOrEqual(390);
   }
+  await page.getByRole('button',{name:'打开导航',exact:true}).click();
+  await page.getByRole('button',{name:'主题浏览选项',exact:true}).click();
+  const menu=page.getByRole('menu',{name:'主题浏览选项',exact:true});const bounds=await menu.boundingBox();expect(bounds!.x+bounds!.width).toBeLessThanOrEqual(390);
+  await page.getByRole('menuitem',{name:'管理主题',exact:true}).press('Escape');await expect(menu).toHaveCount(0);await expect(page.locator('.app-sidebar')).toHaveClass(/open/);
+  await page.keyboard.press('Escape');await expect(page.locator('.app-sidebar')).not.toHaveClass(/open/);
  }finally{await context.close();}
 });
 

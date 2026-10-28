@@ -143,11 +143,12 @@ test("dual translation source workflow with isolated fake suppliers", async ({
       if ((await page.locator("html").getAttribute("data-theme")) !== theme)
         await page.getByLabel("切换浅深主题").click();
       await expect(
-        page.getByRole("button", { name: "生成翻译", exact: true }),
+        page.locator(".structured-workspace > .reader-toolbar"),
       ).toHaveCSS(
         "background-color",
         theme === "dark" ? "rgb(29, 30, 35)" : "rgb(255, 255, 255)",
       );
+      await expect(page.getByRole("button", { name: "生成翻译", exact: true })).toBeVisible();
       await page
         .locator(".structure-scroll")
         .evaluate((el) => (el.scrollTop = 0));
