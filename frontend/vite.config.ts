@@ -1,9 +1,22 @@
+import { resolve } from "node:path";
 import { defineConfig } from "vite";
+import { gzipSync } from "node:zlib";
 import react from "@vitejs/plugin-react";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 export default defineConfig({
   plugins: [
     react(),
+    {
+      name: "public-asset-precompression",
+      writeBundle(options, bundle) {
+        // Read final files: Vite's preload rewriting occurs after generateBundle.
+        for (const name of Object.keys(bundle)) {
+          if (!/\.(?:js|mjs|css|svg|json|txt)$/.test(name)) continue;
+          const path = resolve(options.dir!, name), source = readFileSync(path);
+          if (source.length >= 1024) writeFileSync(path+".gz", gzipSync(source,{level:9}));
+        }
+      },
+    },
     {
       name: "runtime-license-notices",
       generateBundle() {

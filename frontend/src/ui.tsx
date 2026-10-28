@@ -1,5 +1,6 @@
+import { resourceRead, subscribeResourceOwner, resourceOwnerSnapshot } from "./resourceRequests";
 import { MediaBoundary } from "./MediaViewer";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { X, LoaderCircle, AlertCircle } from "lucide-react";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
@@ -89,6 +90,8 @@ export async function upload(
   return data;
 }
 export function useResource<T>(path: string | null, initial: T, timeoutMs = 30000) {
+  const ownerEpoch = useSyncExternalStore(subscribeResourceOwner, resourceOwnerSnapshot);
+  const dataOwner = useRef(ownerEpoch);
   const [data, setData] = useState(initial),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(false),
@@ -99,6 +102,9 @@ export function useResource<T>(path: string | null, initial: T, timeoutMs = 3000
   // what made the topic sidebar spin while its tree was already rendered.
   const sequence = useRef(0);
   useEffect(() => {
+    if (dataOwner.current !== ownerEpoch) {
+      dataOwner.current = ownerEpoch; setData(initial); setLoaded(false); setError(""); setLoading(false);
+    }
     if (!path) return;
     const id = ++sequence.current;
     const controller = new AbortController();
@@ -110,7 +116,7 @@ export function useResource<T>(path: string | null, initial: T, timeoutMs = 3000
     }, timeoutMs);
     setLoading(true);
     setError("");
-    api<T>(path, "GET", undefined, controller.signal)
+    resourceRead<T>(path, signal => api<T>(path, "GET", undefined, signal), controller.signal)
       .then((value) => {
         if (disposed || id !== sequence.current) return;
         setData(value);
@@ -129,13 +135,14 @@ export function useResource<T>(path: string | null, initial: T, timeoutMs = 3000
       clearTimeout(timer);
       controller.abort();
     };
-  }, [path, revision]);
+  }, [path, revision, ownerEpoch]);
+  const sameOwner = dataOwner.current === ownerEpoch;
   return {
-    data,
+    data: sameOwner ? data : initial,
     setData,
     error,
     loading,
-    loaded,
+    loaded: sameOwner && loaded,
     refresh: () => refresh((n) => n + 1),
   };
 }

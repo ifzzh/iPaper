@@ -108,3 +108,27 @@ def test_manifest_includes_imported_css(tmp_path):
         'b': {'file': 'b.js', 'css': ['b.css']},
     }))
     assert build_assets(str(tmp_path))['styles'] == ['workbench/b.css']
+
+
+def test_public_asset_precompression_and_private_boundaries(fixture):
+    import gzip
+    app,_,_=fixture
+    assets=Path(app.static_folder)/'workbench/assets';assets.mkdir()
+    name='main-123abcDE.js';content=b'export const x=1; '*200
+    (assets/name).write_bytes(content);(assets/(name+'.gz')).write_bytes(gzip.compress(content))
+    c=app.test_client();url='/static/workbench/assets/'+name
+    raw=c.get(url,headers={'Accept-Encoding':'identity'})
+    zipped=c.get(url,headers={'Accept-Encoding':'gzip'})
+    assert raw.data==content and 'Content-Encoding' not in raw.headers
+    assert gzip.decompress(zipped.data)==content and zipped.headers['Content-Encoding']=='gzip'
+    assert 'Accept-Encoding' in zipped.headers['Vary'] and 'immutable' in zipped.headers['Cache-Control']
+    assert len(zipped.data)<len(raw.data)//2
+    assert c.get(url,headers={'Accept-Encoding':'gzip','If-None-Match':zipped.headers['ETag']}).status_code==304
+    refused=c.get('/api/paper/a-0/file',headers={'Accept-Encoding':'gzip'})
+    assert refused.status_code==401 and 'Content-Encoding' not in refused.headers
+    assert 'no-store' in refused.headers['Cache-Control']
+    login(c)
+    pdf=c.get('/api/paper/a-0/file',headers={'Accept-Encoding':'gzip','Range':'bytes=0-9'})
+    # This legacy-path fixture is rejected by the file confinement guard.
+    assert pdf.status_code==409 and 'Content-Encoding' not in pdf.headers
+    assert 'no-store' in pdf.headers['Cache-Control']

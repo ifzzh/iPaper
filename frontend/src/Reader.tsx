@@ -137,12 +137,19 @@ function PdfPage({
     if (!thumbnail) onLayout?.();
   }, [height, width, thumbnail]);
   useEffect(() => {
+    // Start close to the viewport; retain nearby pages to avoid render/cancel
+    // thrashing when a reader scrolls back over a page boundary.
     const observer = new IntersectionObserver(
-      (entries) => setVisible(entries[0].isIntersecting),
-      { root: root.current, rootMargin: thumbnail ? "250px" : "900px" },
+      entries => { if (entries[0].isIntersecting) setVisible(true); },
+      { root: root.current, rootMargin: thumbnail ? "100px" : "250px" },
+    );
+    const retention = new IntersectionObserver(
+      entries => { if (!entries[0].isIntersecting) setVisible(false); },
+      { root: root.current, rootMargin: thumbnail ? "500px" : "1600px" },
     );
     observer.observe(host.current!);
-    return () => observer.disconnect();
+    retention.observe(host.current!);
+    return () => { observer.disconnect(); retention.disconnect(); };
   }, [root]);
   useEffect(() => {
     if (!visible) return;
@@ -519,7 +526,7 @@ export function PdfReader({
         useSystemFonts: false,
         disableAutoFetch: true,
         disableStream: true,
-        rangeChunkSize: 65536,
+        rangeChunkSize: 262144,
       });
       task.onPassword = (update: (value: string) => void, reason: number) => {
         if (active) {
@@ -532,8 +539,9 @@ export function PdfReader({
       };
       const value = await task.promise;
       if (!active) return;
+      const firstPage = value.getPage(1);
       const saved = (await positions)[variant];
-      const first = await value.getPage(1);
+      const first = await firstPage;
       if (!active) return;
       const vp = first.getViewport({ scale: 1 });
       baseSize.current = { width: vp.width, height: vp.height };

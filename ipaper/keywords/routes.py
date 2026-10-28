@@ -55,7 +55,7 @@ def register_keyword_routes(app, service):
         with store.connection() as conn:
             return selected_ids(conn, store.owner, data)
 
-    def public_paper(p, db):
+    def public_paper(p, summaries):
         obj = Paper.from_dict(p).to_dict()
         # Public projection: never expose server file paths or free-form extra.
         public = {
@@ -81,8 +81,7 @@ def register_keyword_routes(app, service):
                 "category_id",
             )
         }
-        from .organize import saved_summary
-        public["summary"] = saved_summary(db, current_user_id(), p)
+        public["summary"] = summaries.get(p["id"], "")
         return public
 
     @bp.get("/api/library/index")
@@ -91,7 +90,10 @@ def register_keyword_routes(app, service):
         # walk, PDF inspection or content generation is performed by this read.
         store = service.store()
         with store.connection() as db:
-            return jsonify([public_paper(p, db) for p in members(db, store.owner, {})])
+            from .organize import saved_summaries
+            papers = members(db, store.owner, {})
+            summaries = saved_summaries(db, store.owner, papers)
+            return jsonify([public_paper(p, summaries) for p in papers])
 
     @bp.get("/api/library/navigation")
     def navigation():
@@ -132,17 +134,16 @@ def register_keyword_routes(app, service):
         with store.connection() as db:
             rows = members(db, store.owner, query)
             chosen = rows[(page - 1) * limit : page * limit]
-            output = []
-            for p in chosen:
-                public = public_paper(p, db)
-                public["tags"] = [
-                    {"id": r[0], "name": r[1]}
-                    for r in db.execute(
-                        "SELECT t.id,t.name FROM keyword_links l JOIN keyword_tags t ON t.id=l.tag_id AND t.owner_id=l.owner_id WHERE l.owner_id=? AND l.paper_id=? AND t.status='active' ORDER BY l.manual DESC,t.name,t.id",
-                        (store.owner, p["id"]),
-                    )
-                ]
-                output.append(public)
+            from .organize import saved_summaries
+            summaries = saved_summaries(db, store.owner, chosen)
+            tags = {p['id']: [] for p in chosen}
+            if chosen:
+                marks = ','.join('?' for _ in chosen)
+                for row in db.execute(
+                    f"SELECT l.paper_id,t.id,t.name FROM keyword_links l JOIN keyword_tags t ON t.id=l.tag_id AND t.owner_id=l.owner_id WHERE l.owner_id=? AND l.paper_id IN ({marks}) AND t.status='active' ORDER BY l.manual DESC,t.name,t.id",
+                    (store.owner, *tags)):
+                    tags[row[0]].append({'id': row[1], 'name': row[2]})
+            output = [{**public_paper(p, summaries), 'tags': tags[p['id']]} for p in chosen]
         return jsonify(items=output, total=len(rows), page=page, limit=limit)
 
     @bp.post("/api/library/selections")

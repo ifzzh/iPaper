@@ -1,7 +1,7 @@
 import {OrganizationDialog} from "./Organization";
 import {LibraryCover} from "./LibraryCover";
 import "./library-organization.css";
-import { TopicSidebar, TopicManager, PaperTopics, TopicBatchDialog } from "./Topics";
+import { TopicSidebar, TopicManager, PaperTopics, TopicBatchDialog, type TopicCatalog } from "./Topics";
 import {
   TagChips,
   PaperKeywords,
@@ -167,7 +167,7 @@ export function Library({
     setTopicFilter(value);
     onPreferences({topicFilter: value});
   }
-  const topicCatalog = useResource<{topics: {id: string; name: string}[]; legacyMapping: Record<string,string>}>("/api/topics", {topics: [], legacyMapping: {}});
+  const topicCatalog = useResource<TopicCatalog>("/api/topics", {topics: [], legacyMapping: {}, total:0, unorganized:0, operations:[]});
   useEffect(() => {
     if (filter === 'root') setFilter('all');
     else if(filter.startsWith('topic:') || filter === 'unorganized') { chooseTopics(filter); setFilter('all'); }
@@ -246,7 +246,10 @@ export function Library({
     setChecked([]);
     setSelectionId("");
   }, [filter, topicFilter, query, tagIds, tagMode, order]);
+  const previousItems = useRef(items);
   useEffect(() => {
+    if (previousItems.current === items) return;
+    previousItems.current = items;
     list.refresh();
     catalog.refresh();
   }, [items]);
@@ -1006,6 +1009,7 @@ export function Library({
         createPortal(
           <div className="sidebar-topics-inner">
             <TopicSidebar
+              catalog={topicCatalog}
               filter={topicFilter}
               onFilter={chooseTopics}
               changed={topicRevision}

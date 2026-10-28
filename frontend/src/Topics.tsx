@@ -1,18 +1,19 @@
 import { useEffect, useState, useRef } from "react";
-import { Folder, Plus, Settings2, X } from "lucide-react";
+import { Folder, Plus, Minus, Settings2, X } from "lucide-react";
 import { api, useResource, Modal, Field, Status } from "./ui";
 import { errorText } from "./api";
 
 export type Topic = { id: string; name: string; parent_id: string | null; revision: number; count: number; manual?: boolean; definition_id?: string | null; sort_order?: number };
-type Catalog = { redirects?: Record<string,string|null>; deleted?: Topic[]; topics: Topic[]; unorganized: number; total: number; operations: { id: string; kind: string; undone: boolean }[] };
-const empty: Catalog = { topics: [], unorganized: 0, total: 0, operations: [] };
+export type TopicCatalog = { legacyMapping?: Record<string,string>; redirects?: Record<string,string|null>; deleted?: Topic[]; topics: Topic[]; unorganized: number; total: number; operations: { id: string; kind: string; undone: boolean }[] };
+const empty: TopicCatalog = { topics: [], unorganized: 0, total: 0, operations: [] };
 function ordered(topics: Topic[], parent: string | null = null, depth = 0): { topic: Topic; depth: number }[] {
   if (depth > 12) return [];
   return topics.filter(t => t.parent_id === parent).sort((a,b) => (a.sort_order || 0)-(b.sort_order || 0) || a.id.localeCompare(b.id)).flatMap(topic => [{ topic, depth }, ...ordered(topics, topic.id, depth + 1)]);
 }
 
-export function TopicSidebar({ filter, onFilter, changed, collapsed = [], onCollapsed = () => {} }: { filter: string; onFilter: (s: string) => void; changed: number; collapsed?: string[]; onCollapsed?: (ids: string[]) => void }) {
-  const data = useResource<Catalog>("/api/topics", empty);
+export function TopicSidebar({ filter, onFilter, changed, collapsed = [], onCollapsed = () => {}, catalog }: { catalog?: ReturnType<typeof useResource<TopicCatalog>>; filter: string; onFilter: (s: string) => void; changed: number; collapsed?: string[]; onCollapsed?: (ids: string[]) => void }) {
+  const ownData = useResource<TopicCatalog>(catalog ? null : "/api/topics", empty);
+  const data = catalog || ownData;
   const [manage, setManage] = useState(false);
   const selected = filter.startsWith("topic:") ? filter.slice(6).split(",") : [];
   function toggle(id: string) {const next = selected.includes(id) ? selected.filter(t => t !== id) : [...selected, id]; onFilter(next.length ? "topic:" + next.join(",") : "all");}
@@ -49,7 +50,7 @@ export function TopicSidebar({ filter, onFilter, changed, collapsed = [], onColl
     <Status loading={data.loading && !data.loaded} error={data.error} retry={data.refresh}/>
     <nav className="category-tree" aria-label="研究主题">
       <div className={"category-row" + (filter === "unorganized" ? " active" : "")}><button onClick={() => onFilter("unorganized")}><Folder size={16}/><span>待整理</span><small>{data.data.unorganized}</small></button></div>
-      {ordered(data.data.topics).filter(({topic})=>visible(topic)).map(({ topic, depth }) => <div key={topic.id} className={"category-row topic-row depth-" + Math.min(depth, 4) + (selected.includes(topic.id) ? " active" : "")}>{data.data.topics.some(n=>n.parent_id===topic.id) && <button className="topic-collapse" aria-label={(collapsed.includes(topic.id)?"展开主题 ":"折叠主题 ")+topic.name} onClick={()=>onCollapsed(collapsed.includes(topic.id)?collapsed.filter(id=>id!==topic.id):[...collapsed,topic.id])}>{collapsed.includes(topic.id)?"▸":"▾"}</button>}<input type="checkbox" aria-label={"组合主题 " + topic.name} checked={selected.includes(topic.id)} onChange={() => toggle(topic.id)}/><button onClick={() => onFilter("topic:" + topic.id)}><Folder size={16}/><span>{topic.name}</span><small>{topic.count}</small></button></div>)}
+      {ordered(data.data.topics).filter(({topic})=>visible(topic)).map(({ topic, depth }) => <div key={topic.id} className={"category-row topic-row depth-" + Math.min(depth, 4) + (selected.includes(topic.id) ? " active" : "")}>{data.data.topics.some(n=>n.parent_id===topic.id) && <button className="topic-collapse" aria-expanded={!collapsed.includes(topic.id)} aria-label={(collapsed.includes(topic.id)?"展开主题 ":"折叠主题 ")+topic.name} onClick={()=>onCollapsed(collapsed.includes(topic.id)?collapsed.filter(id=>id!==topic.id):[...collapsed,topic.id])}>{collapsed.includes(topic.id)?<Plus size={12}/>:<Minus size={12}/>}</button>}<input type="checkbox" aria-label={"组合主题 " + topic.name} checked={selected.includes(topic.id)} onChange={() => toggle(topic.id)}/><button onClick={() => onFilter("topic:" + topic.id)}><Folder size={16}/><span>{topic.name}</span><small>{topic.count}</small></button></div>)}
       {data.loaded && !data.data.topics.length && <p className="muted">尚无研究主题。整理已入库论文后会形成有依据的方向，也可手动创建。</p>}
     </nav>
     {manage && <TopicManager onClose={() => { setManage(false); data.refresh(); }}/ >}
@@ -57,7 +58,7 @@ export function TopicSidebar({ filter, onFilter, changed, collapsed = [], onColl
 }
 
 export function TopicManager({ onClose }: { onClose: () => void }) {
-  const catalog = useResource<Catalog>("/api/topics", empty);
+  const catalog = useResource<TopicCatalog>("/api/topics", empty);
   const [selected, setSelected] = useState("");
   const [name, setName] = useState("");
   const [parent, setParent] = useState("");
@@ -101,7 +102,7 @@ export function TopicManager({ onClose }: { onClose: () => void }) {
 }
 
 export function PaperTopics({ paperId, onChanged }: { paperId: string; onChanged: () => void }) {
-  const catalog = useResource<Catalog>("/api/topics", empty);
+  const catalog = useResource<TopicCatalog>("/api/topics", empty);
   const state = useResource<{ revision: number; topics: Topic[] }>("/api/paper/" + encodeURIComponent(paperId) + "/topics", { revision: 0, topics: [] });
   const [failure, setFailure] = useState("");
   const [busy, setBusy] = useState(false);
@@ -123,7 +124,7 @@ export function PaperTopics({ paperId, onChanged }: { paperId: string; onChanged
 }
 
 export function TopicBatchDialog({ selection, onClose, onChanged }: { selection: Record<string, unknown>; onClose: () => void; onChanged: () => void }) {
-  const catalog = useResource<Catalog>("/api/topics", empty);
+  const catalog = useResource<TopicCatalog>("/api/topics", empty);
   type Preview = {count: number; paperIds: string[]; revisions: Record<string, number>};
   const [preview, setPreview] = useState<Preview | null>(null);
   const [topicId, setTopicId] = useState("");

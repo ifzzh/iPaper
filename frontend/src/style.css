@@ -3363,3 +3363,20 @@ progress {
 }
 .note-sources ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .note-sources li { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+
+/* Quiet, consistent disclosures; native details retain keyboard semantics. */
+summary { list-style: none; cursor: pointer; }
+summary::-webkit-details-marker { display: none; }
+summary::before { content: "+"; display: inline-grid; place-items: center;
+  width: 20px; height: 20px; margin-right: 8px; border-radius: 6px;
+  background: var(--hover); color: var(--muted); font-size: 14px; font-weight: 500; }
+details[open] > summary::before { content: "−"; }
+.topic-row > .topic-collapse:first-child { display: inline-flex; align-items: center;
+  justify-content: center; flex: 0 0 24px; width: 24px; height: 28px; padding: 0;
+  border: 0; border-radius: 7px; background: transparent; color: var(--muted); }
+.topic-row > .topic-collapse:hover { background: var(--hover); color: var(--text); }
+.topic-row:not(:has(> .topic-collapse)) { padding-left: 24px; }
+.topic-row { min-height: 38px; gap: 5px; margin-block: 2px; }
+.topic-row > button:last-child { font-size: var(--fs-sm); line-height: 1.45; padding-block: 10px; }
+.topic-row > input[type="checkbox"] { opacity: .5; }
+.topic-row:hover > input, .topic-row:focus-within > input, .topic-row.active > input { opacity: 1; }

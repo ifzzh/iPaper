@@ -47,3 +47,24 @@ test('summary first, grounded tags, topic completion and card/list reading views
  expect((await(await page.request.get('/api/organization/settings')).json()).automatic).toBe(false);
  expect(faults).toEqual([]);
 });
+
+test('cover revisits revalidate permissions and reuse unchanged pixels',async({page})=>{
+ await page.request.post('/api/auth/login',{data:{username:'reader_pdf',password:'workbench-test-pass'}});
+ let gets=0,heads=0;
+ page.on('request',r=>{if(/\/api\/paper\/[^/]+\/file$/.test(new URL(r.url()).pathname)){if(r.method()==='GET')gets++;if(r.method()==='HEAD')heads++;}});
+ await page.goto('/?view=library');
+ await page.getByRole('button',{name:'卡片视图',exact:true}).click();
+ await expect(page.locator('.library-cover.ready').first()).toBeVisible({timeout:30000});
+ await expect(page.locator('.library-cover.loading')).toHaveCount(0,{timeout:30000});
+ const before={gets,heads};
+ await page.getByRole('button',{name:'列表视图',exact:true}).click();
+ await page.getByRole('button',{name:'卡片视图',exact:true}).click();
+ await expect(page.locator('.library-cover.ready').first()).toBeVisible({timeout:30000});
+ await expect(page.locator('.library-cover.loading')).toHaveCount(0,{timeout:30000});
+ expect(gets).toBe(before.gets);expect(heads).toBeGreaterThan(before.heads);
+ await page.getByRole('button',{name:'列表视图',exact:true}).click();
+ await page.route('**/api/paper/*/file',r=>r.request().method()==='HEAD'?r.fulfill({status:403,body:''}):r.continue());
+ await page.getByRole('button',{name:'卡片视图',exact:true}).click();
+ await expect(page.locator('.library-cover.failed').first()).toBeVisible({timeout:30000});
+ await expect(page.locator('.library-cover.ready')).toHaveCount(0);
+});

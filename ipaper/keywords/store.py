@@ -37,9 +37,12 @@ def observed_signature(db, owner, paper):
         "SELECT fields_json FROM bibliography WHERE owner_id=? AND paper_id=?",
         (owner, paper["id"]),
     ).fetchone()
-    from ipaper.metadata.model import legacy_fields
+    return source_signature(paper, json.loads(head[0]) if head else None)
 
-    fields = json.loads(head[0]) if head else legacy_fields(paper)
+
+def source_signature(paper, fields=None):
+    from ipaper.metadata.model import legacy_fields
+    fields = fields if fields is not None else legacy_fields(paper)
     return fingerprint(
         [fields, paper.get("keywords"), paper.get("file_path"), paper.get("is_daily")]
     )

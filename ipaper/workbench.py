@@ -2,7 +2,10 @@
 from pathlib import Path, PurePosixPath
 import json
 
-from flask import abort, redirect, render_template, request
+from flask import abort, redirect, render_template, request, send_file
+from werkzeug.utils import safe_join
+import mimetypes
+import re
 
 
 def build_assets(static_folder: str) -> dict:
@@ -58,6 +61,36 @@ def render_workspace():
 def register_workbench(app):
     from ipaper.workspace_state import register_workspace_state
     register_workspace_state(app)
+
+    @app.before_request
+    def compressed_public_asset():
+        # Only shipped public UI assets. Never compress private API/PDF data.
+        if request.endpoint != 'static' or request.method not in {'GET','HEAD'} or 'Range' in request.headers:
+            return None
+        name = (request.view_args or {}).get('filename', '')
+        if not name.startswith('workbench/') or not re.search(r'\.(js|mjs|css|svg|json|txt)$', name):
+            return None
+        if request.accept_encodings['gzip'] <= 0:
+            return None
+        target = safe_join(app.static_folder, name + '.gz')
+        root = Path(app.static_folder).resolve()
+        path = Path(target) if target else None
+        if not path or not path.is_file() or not path.resolve().is_relative_to(root):
+            return None
+        response = send_file(path, mimetype=mimetypes.guess_type(name)[0] or 'application/octet-stream', conditional=True)
+        response.headers['Content-Encoding'] = 'gzip'
+        response.vary.add('Accept-Encoding')
+        return response
+
+    @app.after_request
+    def public_asset_cache(response):
+        name = (request.view_args or {}).get('filename', '')
+        if request.endpoint == 'static' and name.startswith('workbench/'):
+            response.vary.add('Accept-Encoding')
+            if response.status_code in {200,304} and re.fullmatch(r'workbench/assets/[^/]+-[A-Za-z0-9_-]{8,}\.(?:js|mjs|css)', name):
+                response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+        return response
+
 
     @app.get("/workbench")
     @app.get("/workbench/")

@@ -1,4 +1,5 @@
 import "vite/modulepreload-polyfill";
+import { setResourceOwner } from "./resourceRequests";
 import { createRoot } from "react-dom/client";
 import { useEffect, useRef, useState, lazy, Suspense } from "react";
 import {
@@ -128,6 +129,8 @@ function App() {
     setUser(null);
     identity.current = null;
     setNoteOwner("");
+    setResourceOwner("");
+    window.dispatchEvent(new Event("ipaper-private-cache-clear"));
     clearNoteDrafts();
     setItems([]);
     setItemsLoaded(false);
@@ -153,6 +156,7 @@ function App() {
       if (identity.current && identity.current.id !== s.user.id) clear();
       identity.current = s.user;
       setNoteOwner(s.user.id);
+      setResourceOwner(s.user.id);
       setUser(s.user);
     } catch (e) {
       if (!c.signal.aborted) setError("无法检查登录状态，请重新加载。");

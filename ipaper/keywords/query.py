@@ -95,7 +95,10 @@ def members(db, owner, query, resolve=None):
     result = []
     # Streaming the authoritative rows avoids the historical FTS top-100 cap and
     # keeps Unicode literal matching identical for UI and every batch consumer.
-    for row in db.execute("SELECT * FROM papers WHERE owner_id=?", (owner,)):
+    for row in db.execute(
+        "SELECT * FROM papers WHERE owner_id=? AND COALESCE(file_path,'')<>'' "
+        "AND instr(file_path,'/.daily_arxiv_temp/')=0 "
+        "AND (COALESCE(is_daily,0)=0 OR instr(file_path,'/.categories/')>0 OR instr(file_path,'/_ReadingListTemp/')>0)", (owner,)):
         p = unpack(row)
         if not in_library(p):
             continue

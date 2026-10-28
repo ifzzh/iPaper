@@ -21,6 +21,26 @@ def saved_summary(db, owner, paper):
     return prior.strip() if chinese(prior) else ''
 
 
+def saved_summaries(db, owner, papers):
+    """One bounded read per table, with the same adopted-input invalidation."""
+    from .store import source_signature
+    result = {}
+    # Chunk for SQLite's variable limit; callers may request a full library index.
+    for start in range(0, len(papers), 400):
+        batch = papers[start:start+400]
+        ids = [p['id'] for p in batch]
+        marks = ','.join('?' for _ in ids)
+        rows = {r['paper_id']: r for r in db.execute(
+            f'SELECT paper_id,summary,source_signature FROM library_summaries WHERE owner_id=? AND paper_id IN ({marks})', (owner, *ids))}
+        heads = {r[0]: json.loads(r[1]) for r in db.execute(
+            f'SELECT paper_id,fields_json FROM bibliography WHERE owner_id=? AND paper_id IN ({marks})', (owner, *ids))} if rows else {}
+        for paper in batch:
+            row = rows.get(paper['id'])
+            prior = paper.get('summary', '')
+            result[paper['id']] = row['summary'] if row and row['source_signature'] == source_signature(paper, heads.get(paper['id'])) else prior.strip() if chinese(prior) else ''
+    return result
+
+
 def bounded(source):
     """Give the model an explicitly bounded excerpt; keep full input identity."""
     sections, remaining = [], 14000
