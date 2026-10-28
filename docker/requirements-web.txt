@@ -14,7 +14,7 @@ arxiv==4.0.1
     # via ipaper
 blinker==1.9.0
     # via flask
-certifi==2026.1.4
+certifi==2026.10.23
     # via
     #   httpcore
     #   httpx
@@ -33,8 +33,6 @@ cryptography==50.0.1
     # via ipaper
 distro==1.9.0
     # via openai
-exceptiongroup==1.3.1 ; python_full_version < '3.11'
-    # via anyio
 flask==3.1.3
     # via ipaper
 gunicorn==26.2.0
@@ -86,18 +84,15 @@ tqdm==4.67.3
 typing-extensions==4.15.0
     # via
     #   anyio
-    #   arxiv
-    #   cryptography
-    #   exceptiongroup
     #   openai
     #   pydantic
     #   pydantic-core
     #   typing-inspection
 typing-inspection==0.4.2
     # via pydantic
-urllib3==2.7.0
+urllib3==2.8.0
     # via requests
-werkzeug==3.1.8
+werkzeug==3.1.9
     # via
     #   flask
     #   ipaper
