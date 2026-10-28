@@ -59,7 +59,8 @@ test("300-page PDF full search, exact highlight, outline and durable bookmark", 
   await page.getByLabel("书签名称").fill("末页前的证据");
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await page.reload();
-  await page.getByRole("button", {name:"显示阅读导航",exact:true}).click();
+  if(await page.getByRole("button", {name:"显示阅读导航",exact:true}).getAttribute("aria-pressed")!=="true")
+    await page.getByRole("button", {name:"显示阅读导航",exact:true}).click();
   await page.getByRole("button", { name: "书签", exact: true }).click();
   await expect(page.locator(".bookmark-row")).toContainText("末页前的证据");
   await page.getByRole("button", { name: "末页前的证据" }).click();
@@ -72,7 +73,8 @@ test("300-page PDF full search, exact highlight, outline and durable bookmark", 
   await page.getByLabel("搜索 PDF 全文").fill("scan");
   await expect(page.getByText(/此 PDF 没有可搜索文字/)).toBeVisible();
   await page.goto("/?view=reader&paper=c-2&document=original");
-  await page.getByRole("button", {name:"显示阅读导航",exact:true}).click();
+  if(await page.getByRole("button", {name:"显示阅读导航",exact:true}).getAttribute("aria-pressed")!=="true")
+    await page.getByRole("button", {name:"显示阅读导航",exact:true}).click();
   await expect(page.getByText(/没有可用目录/)).toBeVisible();
   expect(errors).toEqual([]);
   expect(csp).toEqual([]);
