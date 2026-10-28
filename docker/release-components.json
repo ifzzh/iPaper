@@ -3,16 +3,19 @@
   "web": {
     "tag": "1.14.0",
     "publish": true,
-    "repository": "ifzzh520/ipaper"
+    "repository": "ifzzh520/ipaper",
+    "digest": "sha256:f801790cd84dc6c140ae79f5ee04a3296c723430f99961393506f39404440b4a"
   },
   "translation_worker": {
     "tag": "1.2.1",
     "publish": true,
-    "repository": "ifzzh520/ipaper-translation-worker"
+    "repository": "ifzzh520/ipaper-translation-worker",
+    "digest": "sha256:62565953c5f265d40513295c5cd66f2ddbbe6ee31350a463678b4fe6bfca4149"
   },
   "document_worker": {
     "tag": "1.2.1",
     "publish": true,
-    "repository": "ifzzh520/ipaper-document-worker"
+    "repository": "ifzzh520/ipaper-document-worker",
+    "digest": "sha256:5b0fa86b8bba0336387476cfc218f0bbe956c88bff9441a308cef37e9d8fb230"
   }
 }
