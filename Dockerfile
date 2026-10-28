@@ -7,6 +7,8 @@ RUN npm run typecheck && npm test && npm run build && npm audit --audit-level=hi
 
 FROM ubuntu:24.04 AS build-base
 
+ARG APT_REFRESH=2026-10-28
+
 ARG HTTP_PROXY=
 ARG HTTPS_PROXY=
 ARG NO_PROXY=
@@ -20,7 +22,9 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-RUN apt-get -o Acquire::http::Proxy="false" -o Acquire::https::Proxy="false" update \
+RUN test -n "$APT_REFRESH" \
+ && apt-get -o Acquire::http::Proxy="false" -o Acquire::https::Proxy="false" update \
+ && apt-get -o Acquire::http::Proxy="false" -o Acquire::https::Proxy="false" upgrade -y --no-install-recommends \
  && apt-get -o Acquire::http::Proxy="false" -o Acquire::https::Proxy="false" install -y --no-install-recommends \
       build-essential ca-certificates python3 python3-dev python3-pip python3-venv \
  && rm -rf /var/lib/apt/lists/*
@@ -37,26 +41,6 @@ COPY docker/requirements-document.txt /tmp/requirements.txt
 RUN uv venv /opt/venv \
  && uv pip sync --python /opt/venv/bin/python /tmp/requirements.txt
 
-FROM document-dependencies AS test
-COPY docker/requirements-test.txt /tmp/requirements.txt
-RUN uv pip sync --python /opt/venv/bin/python /tmp/requirements.txt
-ENV PATH=/opt/venv/bin:$PATH
-WORKDIR /app
-COPY pyproject.toml uv.lock ./
-COPY Dockerfile gunicorn.conf.py ./
-COPY docker-compose.yaml ./
-COPY docker/release-components.json ./docker/release-components.json
-COPY app.py ./
-COPY ipaper ./ipaper
-COPY static ./static
-COPY --from=frontend-build /build/static/workbench ./static/workbench
-COPY templates ./templates
-COPY scripts ./scripts
-COPY security ./security
-COPY .github ./.github
-COPY tests ./tests
-RUN pytest -m "not integration" -q
-
 FROM build-base AS worker-dependencies
 COPY docker/requirements-worker.txt /tmp/requirements.txt
 RUN uv venv /opt/venv \
@@ -64,12 +48,16 @@ RUN uv venv /opt/venv \
 
 FROM ubuntu:24.04 AS runtime-base
 
+ARG APT_REFRESH=2026-10-28
+
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH=/opt/venv/bin:$PATH
 
-RUN apt-get -o Acquire::http::Proxy="false" -o Acquire::https::Proxy="false" update \
+RUN test -n "$APT_REFRESH" \
+ && apt-get -o Acquire::http::Proxy="false" -o Acquire::https::Proxy="false" update \
+ && apt-get -o Acquire::http::Proxy="false" -o Acquire::https::Proxy="false" upgrade -y --no-install-recommends \
  && apt-get -o Acquire::http::Proxy="false" -o Acquire::https::Proxy="false" install -y --no-install-recommends \
       ca-certificates libglib2.0-0 libgl1 libgomp1 libx11-6 libxcb1 libxext6 libxrender1 python3 \
  && rm -rf /var/lib/apt/lists/*
@@ -171,3 +159,26 @@ EXPOSE 7191
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=30s \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7191/healthz', timeout=4).read()"
 CMD ["gunicorn", "--config", "gunicorn.conf.py", "wsgi:application"]
+
+FROM document-dependencies AS test
+COPY docker/requirements-test.txt /tmp/requirements.txt
+RUN uv pip sync --python /opt/venv/bin/python /tmp/requirements.txt
+ENV PATH=/opt/venv/bin:$PATH
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+COPY Dockerfile gunicorn.conf.py ./
+COPY docker-compose.yaml ./
+COPY docker/release-components.json ./docker/release-components.json
+COPY app.py ./
+COPY ipaper ./ipaper
+COPY static ./static
+COPY --from=frontend-build /build/static/workbench ./static/workbench
+COPY templates ./templates
+COPY scripts ./scripts
+COPY security ./security
+COPY .github ./.github
+COPY tests ./tests
+RUN pytest -m "not integration" -q
+
+# Preserve the default docker build output as the production Web image.
+FROM runtime AS release

@@ -23,3 +23,5 @@ PDF.js 按需读取 256 KiB 分块，不自动下载全文。正文在视口前�
 ## 运行依赖
 
 本轮安全依赖升级后，源码环境支持 Python 3.11–3.13，正式 Docker 使用 Python 3.12。Web、Document Worker 与 Translation Worker 的锁文件分别审计；BabelDOC/MinerU 的业务版本未因性能优化变更。
+
+发布构建对 Ubuntu 执行系统安全更新，并使用 `--pull --build-arg APT_REFRESH=YYYY-MM-DD` 刷新基础层与 apt 缓存。test 阶段位于最终镜像之后，独立执行完整门禁；构建三个运行目标不会因 Docker 旧构建器按顺序遍历而重复执行整个测试阶段。
