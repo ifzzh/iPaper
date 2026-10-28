@@ -148,6 +148,9 @@ def test_preview_is_readonly_and_view_preference_persists(organized):
     state=c.get('/api/workspace/state').json
     assert c.put('/api/workspace/state',json={**state,'libraryView':'cards'},headers=h).status_code==200
     assert c.get('/api/workspace/state').json['libraryView']=='cards'
+    with s.store(u['id']).connection() as db:
+        legacy=json.loads(db.execute("SELECT value FROM user_settings_v2 WHERE owner_id=? AND key='workspace_v1'",(u['id'],)).fetchone()[0])
+        assert 'libraryView' not in legacy # old Web must still accept its state envelope
     assert c.put('/api/workspace/state',json={**state,'libraryView':'malformed'},headers=h).status_code==400
 
 

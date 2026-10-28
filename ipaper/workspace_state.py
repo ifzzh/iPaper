@@ -55,6 +55,9 @@ def register_workspace_state(app):
             if request.method == 'GET':
                 data = _read('workspace_v1', {})
                 data.update(_read('topic_navigation_v1', {}))
+                library_navigation=_read('library_navigation_v1', {})
+                if library_navigation.get('libraryView') in ('list','cards'):
+                    data['libraryView']=library_navigation['libraryView']
                 navigation = _read('reading_navigation_v1', {})
                 if navigation.get('navigationPanel') in ('outline', 'thumbnails', 'bookmarks'):
                     data['navigationPanel'] = navigation['navigationPanel']
@@ -140,8 +143,10 @@ def register_workspace_state(app):
                 if not isinstance(task, dict) or set(task) != {'id', 'kind', 'label'} or task['kind'] not in ('upload', 'import', 'export', 'analysis') or any(not isinstance(task[k], str) or len(task[k]) > 250 for k in ('id', 'label')):
                     raise ValueError()
             # Keep the legacy envelope readable/writable by 1.3 during rollback.
-            legacy = {k: v for k, v in data.items() if k not in ('navigationPanel','topicFilter','topicCollapsed')}
+            legacy = {k: v for k, v in data.items() if k not in ('navigationPanel','topicFilter','topicCollapsed','libraryView')}
             values = {'workspace_v1': legacy}
+            if 'libraryView' in data:
+                values['library_navigation_v1']={'libraryView':data['libraryView']}
             if 'navigationPanel' in data:
                 values['reading_navigation_v1'] = {'navigationPanel': data['navigationPanel']}
             if 'topicFilter' in data or 'topicCollapsed' in data:
