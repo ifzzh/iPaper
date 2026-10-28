@@ -173,3 +173,4 @@
 .app-shell .topic-row.has-children>button:last-child {padding-left:47px}
 .app-shell .topic-row .topic-folder {position:absolute;left:24px;top:50%;transform:translateY(-50%);width:20px;height:24px;padding:2px;min-height:0;border:0;background:transparent;color:var(--faint);justify-content:center}
 .app-shell .topic-row .topic-folder:hover,.app-shell .topic-row .topic-folder:focus-visible {background:var(--surface);color:var(--accent)}
+@media(hover:none){.app-shell .paper-row>input[type=checkbox]{opacity:1}}

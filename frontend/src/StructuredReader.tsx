@@ -365,9 +365,13 @@ export function Reader(props: ReaderProps) {
       )}
       {mode === "structure" ? (
         <main className="structured-workspace">
-          <div className="reader-toolbar">
+          <div className="reader-context-bar">
+            <div className="reader-context-title"><BookOpen size={17}/><span title={props.paper.title}>{props.paper.title}</span></div>
             {props.toolbarLead}
-            {controls}
+          </div>
+          <div className="reader-toolbar">
+            <div className="reader-tools-start">{controls}</div>
+            <div className="reader-tools-end">
             {selected && (
               <select
                 aria-label="结构结果版本"
@@ -390,6 +394,7 @@ export function Reader(props: ReaderProps) {
                   ))}
               </select>
             )}
+            </div>
           </div>
           <Status
             error={results.error}
