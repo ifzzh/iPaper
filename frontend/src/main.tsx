@@ -26,6 +26,7 @@ import { clearNoteDrafts, setNoteOwner } from "./PaperNotes";
 import { papers, paperFrom, type Paper, type User, errorText } from "./api";
 import { workspaceRoute, type View } from "./routes";
 import "./style.css";
+import "./refinement.css";
 const Settings = lazy(() =>
   import("./Settings").then((m) => ({ default: m.Settings })),
 );
@@ -397,7 +398,7 @@ function App() {
     ["settings", "设置", SettingsIcon],
   ] as const;
   return (
-    <div className="app-shell" ref={shell}>
+    <div className={"app-shell"+(["reader","analysis"].includes(locationState.view)?" reading-mode":"")+(sidebarOpen?" navigation-expanded":"")} ref={shell}>
       <aside
         className={"app-sidebar" + (sidebarOpen ? " open" : "")}
         aria-label="应用导航"
@@ -422,6 +423,8 @@ function App() {
           {nav.map(([id, label, Icon]) => (
             <button
               key={id}
+              title={label}
+              aria-label={label}
               className={
                 locationState.view === id ||
                 (["reader", "analysis"].includes(locationState.view) &&
@@ -460,8 +463,9 @@ function App() {
           <button
             className="icon-button sidebar-toggle"
             aria-label="打开导航"
-            title="打开导航"
-            onClick={() => setSidebarOpen(true)}
+            title={sidebarOpen?"收起导航":"展开导航"}
+            aria-expanded={sidebarOpen}
+            onClick={() => setSidebarOpen(v=>!v)}
           >
             <Menu size={18} />
           </button>

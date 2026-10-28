@@ -8,13 +8,15 @@ import {
   type ReactNode,
 } from "react";
 import {
-  getDocument,
   GlobalWorkerOptions,
   TextLayer,
   type PDFDocumentProxy,
   type PDFPageProxy,
   type RenderTask,
 } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { acquirePdf } from "./pdfSession";
+import { pdfDocument } from "./pdfRuntime";
+import { ActionMenu } from "./ActionMenu";
 import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
 import "pdfjs-dist/web/pdf_viewer.css";
 import {
@@ -84,6 +86,7 @@ function PdfPage({
   onLayout,
   estimatedSize,
   thumbnail = false,
+  renderAllowed = true,
   sourceRegions = [],
   searchMatch = null,
   onMatchMissing,
@@ -100,6 +103,7 @@ function PdfPage({
   onLayout?: () => void;
   estimatedSize: { width: number; height: number };
   thumbnail?: boolean;
+  renderAllowed?: boolean;
   sourceRegions?: number[][];
   searchMatch?: Match | null;
   onMatchMissing?: () => void;
@@ -152,7 +156,7 @@ function PdfPage({
     return () => { observer.disconnect(); retention.disconnect(); };
   }, [root]);
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || !renderAllowed) return;
     let active = true,
       render: RenderTask | undefined,
       text: TextLayer | undefined,
@@ -276,7 +280,7 @@ function PdfPage({
           pdfPage?.cleanup();
         });
     };
-  }, [doc, number, scale, rotation, visible, JSON.stringify(sourceRegions)]);
+  }, [doc, number, scale, rotation, visible, renderAllowed, JSON.stringify(sourceRegions)]);
   return (
     <div className="page-wrap">
       <div
@@ -350,6 +354,7 @@ export function PdfReader({
   };
   onSource?: (id: string) => void;
 }) {
+  const [firstPaint,setFirstPaint]=useState(false);
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null),
     [page, setPage] = useState(1),
     [zoom, setZoom] = useState<Position["zoom"]>("width"),
@@ -358,7 +363,7 @@ export function PdfReader({
       () =>
         !embedded &&
         !matchMedia("(max-width:640px)").matches &&
-        preferences.thumbnailOpen !== false,
+        preferences.thumbnailOpen === true,
     ),
     [chat, setChat] = useState(!embedded),
     [mobileChat, setMobileChat] = useState(false),
@@ -481,8 +486,9 @@ export function PdfReader({
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
-    let task: ReturnType<typeof getDocument> | undefined;
+    let lease: Awaited<ReturnType<typeof acquirePdf>> | undefined;
     setDoc(null);
+    setFirstPaint(false);
     loadedUrl.current = "";
     renderedPages.current.clear();
     setError("");
@@ -515,30 +521,23 @@ export function PdfReader({
             );
           return {} as Record<string, Position>;
         });
-      task = getDocument({
-        url,
-        withCredentials: true,
-        cMapUrl: assetRoot + "cmaps/",
-        cMapPacked: true,
-        standardFontDataUrl: assetRoot + "standard_fonts/",
-        wasmUrl: assetRoot + "wasm/",
-        useWasm: false,
-        useSystemFonts: false,
-        disableAutoFetch: true,
-        disableStream: true,
-        rangeChunkSize: 262144,
-      });
-      task.onPassword = (update: (value: string) => void, reason: number) => {
-        if (active) {
-          passwordCallback.current = update;
-          setPasswordNeeded(true);
-          setStatus(
-            reason === 2 ? "密码不正确，请重试。" : "此 PDF 需要密码。",
-          );
-        }
-      };
-      const value = await task.promise;
-      if (!active) return;
+      lease = await acquirePdf({owner: noteOwner(),url,signal:controller.signal,onDestroyed:()=>TextLayer.cleanup(),open: ({etag,stream}) => {
+        const task = pdfDocument({
+          url,withCredentials:true,
+          httpHeaders:etag?{"If-Match":etag}:undefined,
+          cMapUrl:assetRoot+"cmaps/",cMapPacked:true,
+          standardFontDataUrl:assetRoot+"standard_fonts/",wasmUrl:assetRoot+"wasm/",
+          useWasm:false,useSystemFonts:false,
+          disableAutoFetch:!stream,disableStream:!stream,disableRange:stream,
+          rangeChunkSize:524288,
+        });
+        task.onPassword=(update:(v:string)=>void,reason:number)=>{
+          if(active){passwordCallback.current=update;setPasswordNeeded(true);setStatus(reason===2?"密码不正确，请重试。":"此 PDF 需要密码。");}
+        };
+        return task;
+      }});
+      const value=lease.doc;
+      if (!active) {lease.release();return;}
       const firstPage = value.getPage(1);
       const saved = (await positions)[variant];
       const first = await firstPage;
@@ -569,6 +568,9 @@ export function PdfReader({
       setZoom(initial.zoom);
       setRotation(initial.rotation);
       setSessionId(initial.sessionId || "");
+      const viewport = host.current;
+      if(viewport){const odd=initial.rotation%180!==0,w=odd?vp.height:vp.width,h=odd?vp.width:vp.height;
+        setScale(typeof initial.zoom==='number'?initial.zoom:initial.zoom==='width'?Math.max(.25,(viewport.clientWidth-48)/w):Math.max(.25,Math.min((viewport.clientWidth-48)/w,(viewport.clientHeight-40)/h)));}
       setDoc(value);
       loadedUrl.current = url;
       setStatus("正在渲染…");
@@ -599,7 +601,8 @@ export function PdfReader({
       passwordCallback.current = null;
       window.getSelection()?.removeAllRanges();
       void save();
-      destroying.current = task?.destroy().catch(() => {}) || Promise.resolve();
+      lease?.release();
+      destroying.current = Promise.resolve();
     };
   }, [url, retry]);
   useEffect(() => {
@@ -979,6 +982,7 @@ export function PdfReader({
     return () => clearTimeout(timer);
   }, [match, scale, rotation]);
   function pageReady(_n: number) {
+    if(_n === (point.current?.page || page)) setFirstPaint(true);
     renderedPages.current.add(_n);
     const target = annotationDestination.current;
     if (target && target.anchor.mode !== "structure" && target.anchor.page === _n)
@@ -1026,7 +1030,12 @@ export function PdfReader({
       }
       ref={workspace}
     >
+      <div className="reader-context-bar">
+        <div className="reader-context-title"><BookOpen size={17}/><span title={paper.title}>{paper.title}</span></div>
+        {toolbarLead}
+      </div>
       <div className="reader-toolbar">
+        <div className="reader-tools-start">
         <button
           className="icon-button"
           aria-label="显示阅读导航"
@@ -1048,10 +1057,6 @@ export function PdfReader({
         >
           <Search size={17} />
         </button>
-        {toolbarLead}
-        <span className="reader-document-title" title={paper.title}>
-          {paper.title}
-        </span>
         {toolbarContent || (
           <label>
             <span className="sr-only">文档版本</span>
@@ -1070,7 +1075,7 @@ export function PdfReader({
             </select>
           </label>
         )}
-        <div className="toolbar-separator" />
+        </div><div className="reader-page-controls">
         <button
           className="icon-button"
           aria-label="上一页"
@@ -1106,7 +1111,7 @@ export function PdfReader({
         >
           <ChevronRight size={17} />
         </button>
-        <div className="toolbar-separator" />
+        </div><div className="reader-tools-end">
         <select
           aria-label="缩放"
           value={zoom}
@@ -1123,26 +1128,13 @@ export function PdfReader({
             </option>
           ))}
         </select>
-        <button
-          className="icon-button"
-          aria-label="页级记录"
-          title="这一页没有可选文字时使用页级记录"
-          disabled={!doc}
-          onClick={() => setPageNote(true)}
-        >
-          <StickyNote size={17} />
-        </button>
-        <button
-          className="icon-button rotate-button"
-          aria-label="旋转"
-          title="旋转页面"
-          onClick={() => setRotation((v) => (v + 90) % 360)}
-          disabled={!doc}
-        >
-          <RotateCw size={17} />
-        </button>
+        <ActionMenu label="阅读更多操作" actions={[
+          {label:"页级记录",icon:<StickyNote size={16}/>,disabled:!doc,onSelect:()=>setPageNote(true)},
+          {label:"旋转",icon:<RotateCw size={16}/>,disabled:!doc,onSelect:()=>setRotation(v=>(v+90)%360)},
+        ]}/>
         <button
           aria-pressed={chat}
+          aria-label={mobileChat ? "返回阅读" : "论文问答"}
           className="chat-toggle"
           onClick={() => {
             if (matchMedia("(max-width:640px)").matches) {
@@ -1157,6 +1149,7 @@ export function PdfReader({
           <MessageSquare size={17} />
           <span>{mobileChat ? "返回阅读" : "论文问答"}</span>
         </button>
+        </div>
       </div>
       {translateSelection && (
         <SelectionPopup
@@ -1306,6 +1299,7 @@ export function PdfReader({
               </button>
             </div>
           )}
+          {!doc&&!error&&<div className="pdf-loading-preview" aria-hidden="true"><div className="pdf-loading-sheet"><i/><i/><div>{Array.from({length:16},(_,i)=><b key={i}/>)}</div></div></div>}
           <div className="pdf-scroll" ref={host} onScroll={onScroll}>
             {doc &&
               Array.from({ length: doc.numPages }, (_, i) => (
@@ -1315,6 +1309,7 @@ export function PdfReader({
                   onAnnotationOpen={(annotation) => { void openNoteAnnotation(annotation.id); }}
                   doc={doc}
                   number={i + 1}
+                  renderAllowed={firstPaint || i+1===page}
                   scale={scale}
                   rotation={rotation}
                   root={host}

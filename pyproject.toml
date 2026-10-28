@@ -1,6 +1,6 @@
 [project]
 name = "ipaper"
-version = "1.14.0"
+version = "1.15.0"
 description = "iPaper: A fully open-source, modern paper reading and management platform for Vibe Coding"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"

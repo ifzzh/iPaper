@@ -40,7 +40,8 @@ test("300-page PDF full search, exact highlight, outline and durable bookmark", 
     path: "../.devnotes/reading-tools-search-1440-light.png",
   });
   await page.getByLabel("缩放", { exact: true }).selectOption("1");
-  await page.getByLabel("旋转", { exact: true }).click();
+  await page.getByRole("button", {name:"阅读更多操作",exact:true}).click();
+    await page.getByLabel("旋转", { exact: true }).click();
   await expect(page.locator(".pdf-search-highlight").first()).toBeVisible();
   await input.fill("definitely-absent-phrase");
   await input.fill("wrapped paragraph continues onto the next line");
@@ -58,6 +59,7 @@ test("300-page PDF full search, exact highlight, outline and durable bookmark", 
   await page.getByLabel("书签名称").fill("末页前的证据");
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await page.reload();
+  await page.getByRole("button", {name:"显示阅读导航",exact:true}).click();
   await page.getByRole("button", { name: "书签", exact: true }).click();
   await expect(page.locator(".bookmark-row")).toContainText("末页前的证据");
   await page.getByRole("button", { name: "末页前的证据" }).click();
@@ -70,6 +72,7 @@ test("300-page PDF full search, exact highlight, outline and durable bookmark", 
   await page.getByLabel("搜索 PDF 全文").fill("scan");
   await expect(page.getByText(/此 PDF 没有可搜索文字/)).toBeVisible();
   await page.goto("/?view=reader&paper=c-2&document=original");
+  await page.getByRole("button", {name:"显示阅读导航",exact:true}).click();
   await expect(page.getByText(/没有可用目录/)).toBeVisible();
   expect(errors).toEqual([]);
   expect(csp).toEqual([]);

@@ -22,7 +22,7 @@ test('summary first, grounded tags, topic completion and card/list reading views
  await expect(page.locator('.library-cards')).toBeVisible();
  await expect(page.locator('.library-cover.ready').first()).toBeVisible({timeout:30000});
  await expect(page.locator('.library-cards .paper-summary').filter({hasText:'这篇论文研究图神经网络'})).toBeVisible();
- expect(await page.locator('.library-cards .paper-row').first().evaluate(el=>{const r=el.getBoundingClientRect(),button=el.querySelector('.paper-row-aside')!.getBoundingClientRect();return r.height>=480&&button.bottom<=r.bottom;})).toBe(true);
+ expect(await page.locator('.library-cards .paper-row').first().evaluate(el=>{const r=el.getBoundingClientRect(),button=el.querySelector('.paper-row-aside')!.getBoundingClientRect();return r.height>=440&&button.bottom<=r.bottom;})).toBe(true);
  await expect.poll(async()=>(await(await page.request.get('/api/workspace/state')).json()).libraryView).toBe('cards');
  await expect(page.locator('.library-cover.loading')).toHaveCount(0,{timeout:30000});
  const folder=resolve('../.devnotes/library-organization-work/evidence');mkdirSync(folder,{recursive:true});

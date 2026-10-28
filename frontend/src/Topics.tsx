@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
-import { Folder, Plus, Minus, Settings2, X } from "lucide-react";
+import { Folder, FolderOpen, Plus, Settings2, X } from "lucide-react";
+import { ActionMenu } from "./ActionMenu";
 import { api, useResource, Modal, Field, Status } from "./ui";
 import { errorText } from "./api";
 
@@ -15,6 +16,7 @@ export function TopicSidebar({ filter, onFilter, changed, collapsed = [], onColl
   const ownData = useResource<TopicCatalog>(catalog ? null : "/api/topics", empty);
   const data = catalog || ownData;
   const [manage, setManage] = useState(false);
+  const [multi, setMulti] = useState(false);
   const selected = filter.startsWith("topic:") ? filter.slice(6).split(",") : [];
   function toggle(id: string) {const next = selected.includes(id) ? selected.filter(t => t !== id) : [...selected, id]; onFilter(next.length ? "topic:" + next.join(",") : "all");}
   // Refresh when an action reports a change. The first run is skipped: the hook
@@ -46,11 +48,24 @@ export function TopicSidebar({ filter, onFilter, changed, collapsed = [], onColl
   }, [data.loading]);
   function visible(t: Topic) {let parent=t.parent_id; for(let i=0;parent && i<12;i++){if(collapsed.includes(parent)) return false; parent=data.data.topics.find(n=>n.id===parent)?.parent_id || null;}return true;}
   return <>
-    <div className="section-label">研究主题 {filter !== "all" && <button onClick={() => onFilter("all")}>清除筛选</button>} <button className="icon-button" aria-label="管理主题" onClick={() => setManage(true)}><Settings2 size={15}/></button></div>
+    <div className="section-label topic-section-heading"><span>研究主题</span><ActionMenu label="主题浏览选项" actions={[
+      {label:"管理主题",onSelect:()=>setManage(true)},
+      {label:multi?"结束多选":"多选主题",onSelect:()=>setMulti(v=>!v)},
+      {label:"展开全部层级",onSelect:()=>onCollapsed([])},
+      {label:"只看一级主题",onSelect:()=>onCollapsed(data.data.topics.filter(t=>data.data.topics.some(c=>c.parent_id===t.id)).map(t=>t.id))},
+      ...(filter!=="all"?[{label:"清除主题筛选",onSelect:()=>onFilter("all")}]:[]),
+    ]}/></div>
     <Status loading={data.loading && !data.loaded} error={data.error} retry={data.refresh}/>
-    <nav className="category-tree" aria-label="研究主题">
+    <nav className={"category-tree "+(multi?"topic-selecting":"")} aria-label="研究主题">
       <div className={"category-row" + (filter === "unorganized" ? " active" : "")}><button onClick={() => onFilter("unorganized")}><Folder size={16}/><span>待整理</span><small>{data.data.unorganized}</small></button></div>
-      {ordered(data.data.topics).filter(({topic})=>visible(topic)).map(({ topic, depth }) => <div key={topic.id} className={"category-row topic-row depth-" + Math.min(depth, 4) + (selected.includes(topic.id) ? " active" : "")}>{data.data.topics.some(n=>n.parent_id===topic.id) && <button className="topic-collapse" aria-expanded={!collapsed.includes(topic.id)} aria-label={(collapsed.includes(topic.id)?"展开主题 ":"折叠主题 ")+topic.name} onClick={()=>onCollapsed(collapsed.includes(topic.id)?collapsed.filter(id=>id!==topic.id):[...collapsed,topic.id])}>{collapsed.includes(topic.id)?<Plus size={12}/>:<Minus size={12}/>}</button>}<input type="checkbox" aria-label={"组合主题 " + topic.name} checked={selected.includes(topic.id)} onChange={() => toggle(topic.id)}/><button onClick={() => onFilter("topic:" + topic.id)}><Folder size={16}/><span>{topic.name}</span><small>{topic.count}</small></button></div>)}
+      {ordered(data.data.topics).filter(({topic})=>visible(topic)).map(({topic,depth})=>{
+        const children=data.data.topics.some(t=>t.parent_id===topic.id),open=!collapsed.includes(topic.id);
+        return <div key={topic.id} className={"category-row topic-row depth-"+Math.min(depth,4)+(children?" has-children":"")+(selected.includes(topic.id)?" active":"")}>
+          <input type="checkbox" aria-label={"组合主题 "+topic.name} checked={selected.includes(topic.id)} onChange={()=>toggle(topic.id)}/>
+          {children&&<button className="topic-folder" aria-label={(open?"收起子主题 ":"展开子主题 ")+topic.name} title={open?"收起子主题":"展开子主题"} aria-expanded={open} onClick={()=>onCollapsed(open?[...collapsed,topic.id]:collapsed.filter(id=>id!==topic.id))}>{open?<FolderOpen size={14}/>:<Folder size={14}/>}</button>}
+          <button onClick={()=>onFilter("topic:"+topic.id)}>{!children&&<Folder size={14}/>}<span>{topic.name}</span><small>{topic.count}</small></button>
+        </div>;
+      })}
       {data.loaded && !data.data.topics.length && <p className="muted">尚无研究主题。整理已入库论文后会形成有依据的方向，也可手动创建。</p>}
     </nav>
     {manage && <TopicManager onClose={() => { setManage(false); data.refresh(); }}/ >}
@@ -106,19 +121,21 @@ export function PaperTopics({ paperId, onChanged }: { paperId: string; onChanged
   const state = useResource<{ revision: number; topics: Topic[] }>("/api/paper/" + encodeURIComponent(paperId) + "/topics", { revision: 0, topics: [] });
   const [failure, setFailure] = useState("");
   const [busy, setBusy] = useState(false);
+  const [editing,setEditing]=useState(false);
   const [message, setMessage] = useState("");
-  useEffect(() => { setFailure(""); setMessage(""); }, [paperId]);
+  useEffect(() => { setFailure(""); setMessage(""); setEditing(false); }, [paperId]);
   async function edit(action: string, topicId?: string) {
     setBusy(true); setFailure("");
     try { await api("/api/paper/" + encodeURIComponent(paperId) + "/topics", "PATCH", { action, topicId, revision: state.data.revision }); state.refresh(); onChanged(); }
     catch (e) { setFailure(errorText(e)); } finally { setBusy(false); }
   }
-  return <section aria-label="论文研究主题"><h4>研究主题</h4><Status loading={state.loading || busy} error={failure || state.error} retry={state.refresh}/>
-    <div className="keyword-chips">{state.data.topics.map(topic => <span className="keyword-chip" key={topic.id}>{topic.name}<button className="icon-button" disabled={busy} aria-label={"移出主题 " + topic.name} onClick={() => edit("remove", topic.id)}><X size={12}/></button></span>)}</div>
-    <select aria-label="加入研究主题" value="" disabled={busy} onChange={e => { if(e.target.value) void edit("add", e.target.value); }}><option value="">加入主题…</option>{catalog.data.topics.filter(t => !state.data.topics.some(p => p.id === t.id)).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+  return <section className="paper-topics-section" aria-label="论文研究主题"><div className="detail-field-heading"><h4>研究主题</h4><button className="text-button" aria-label="编辑论文主题" onClick={()=>setEditing(v=>!v)}>{editing?"完成":"编辑"}</button></div><Status loading={state.loading || busy} error={failure || state.error} retry={state.refresh}/>
+    <div className="keyword-chips">{state.data.topics.map(topic => <span className="keyword-chip" key={topic.id}>{topic.name}{editing&&<button className="icon-button" disabled={busy} aria-label={"移出主题 " + topic.name} onClick={() => edit("remove", topic.id)}><X size={12}/></button>}</span>)}</div>
+    {editing&&<div className="topic-edit-controls"><select aria-label="加入研究主题" value="" disabled={busy} onChange={e => { if(e.target.value) void edit("add", e.target.value); }}><option value="">加入主题…</option>{catalog.data.topics.filter(t => !state.data.topics.some(p => p.id === t.id)).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
     <button disabled={busy} onClick={async () => { setBusy(true); setFailure(""); try { await api("/api/topics/jobs", "POST", { paperIds: [paperId] }); setMessage("主题整理已提交，可在任务中心查看进度。"); } catch(e) {setFailure(errorText(e));} finally {setBusy(false);} }}>整理主题</button>
     <button disabled={busy || !state.data.topics.length} onClick={() => edit("clear")}>清空主题</button>
     <button disabled={busy} onClick={() => edit("reset")}>重置自动归类保护</button>
+    </div>}
     {message && <p role="status">{message}</p>}
   </section>;
 }

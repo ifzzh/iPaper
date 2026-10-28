@@ -413,7 +413,8 @@ test("two browser pages editing one note get a resolvable conflict", async ({ br
 
 test("a page-level record can be written from the reader toolbar", async ({ page }) => {
   await enterReader(page);
-  await page.getByRole("button", { name: "页级记录", exact: true }).click();
+  await page.getByRole("button", {name:"阅读更多操作",exact:true}).click();
+  await page.getByRole("menuitem", { name: "页级记录", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "页级记录" });
   await expect(dialog).toBeVisible({ timeout: 20000 });
   await dialog.getByLabel("页级记录内容").fill("扫描页级记录");

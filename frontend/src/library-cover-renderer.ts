@@ -1,14 +1,15 @@
-import {getDocument,GlobalWorkerOptions,PDFWorker} from 'pdfjs-dist/legacy/build/pdf.mjs';
+import {GlobalWorkerOptions} from 'pdfjs-dist/legacy/build/pdf.mjs';
 import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
 GlobalWorkerOptions.workerSrc=workerUrl;
+import {pdfDocument} from './pdfRuntime';
 let queue:Promise<unknown>=Promise.resolve();
-let worker:PDFWorker|undefined;
+
 // Rendered pixels only, bounded to 12 MiB. Reuse requires a successful
 // authenticated HEAD with matching ETag. Nothing goes to persistent storage.
 const cache=new Map<string,{etag:string;canvas:HTMLCanvasElement}>();
 let bytes=0,epoch=0;
 window.addEventListener('ipaper-private-cache-clear',()=>{
- epoch++;cache.clear();bytes=0;void worker?.destroy();worker=undefined;
+ epoch++;cache.clear();bytes=0;
 });
 export function renderCover(id:string,canvas:HTMLCanvasElement,signal:AbortSignal){
  const generation=epoch;
@@ -25,7 +26,7 @@ export function renderCover(id:string,canvas:HTMLCanvasElement,signal:AbortSigna
    canvas.getContext('2d')!.drawImage(cached.canvas,0,0);return;
   }
   if(cached){bytes-=cached.canvas.width*cached.canvas.height*4;cache.delete(id);}
-  const task=getDocument({url,worker:worker||=new PDFWorker(),withCredentials:true,
+  const task=pdfDocument({url,withCredentials:true,
    disableAutoFetch:true,disableStream:true,rangeChunkSize:262144,maxImageSize:2000000,
    cMapUrl:'/static/workbench/pdfjs/cmaps/',cMapPacked:true,standardFontDataUrl:'/static/workbench/pdfjs/standard_fonts/'});
   const cancel=()=>{void task.destroy();};signal.addEventListener('abort',cancel,{once:true});

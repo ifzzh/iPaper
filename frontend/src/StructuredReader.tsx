@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  BookOpen,
   ArrowLeft,
   Languages,
   Quote,
@@ -302,7 +303,7 @@ export function Reader(props: ReaderProps) {
         )}
         <option value="structure">结构阅读</option>
       </select>
-      {mode === "translated" && layoutResults.length > 0 && (
+      {mode === "translated" && layoutResults.length > 1 && (
         <select
           aria-label="版式结果版本"
           value={selectedLayout?.id}
@@ -425,6 +426,8 @@ export function Reader(props: ReaderProps) {
             </div>
           )}
         </main>
+      ) : mode === "translated" && !results.loaded ? (
+        <div className="reader-preparing" role="status"><BookOpen size={26}/><h2>正在打开译文</h2><p>{results.error || "确认已有版本，准备阅读…"}</p>{results.error&&<button onClick={results.refresh}>重试</button>}</div>
       ) : (
         <PdfReader
           {...props}

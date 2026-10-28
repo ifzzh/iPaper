@@ -18,10 +18,8 @@ test("unified login, cold library, categories, preferences and feature pages", a
   await expect(page.locator(".paper-details")).toContainText(
     "Learning to read",
   );
-  await page
-    .locator(".app-sidebar")
-    .getByRole("button", { name: "管理主题", exact: true })
-    .click();
+  await page.getByRole("button", {name:"主题浏览选项",exact:true}).click();
+  await page.getByRole("menuitem", {name:"管理主题",exact:true}).click();
   const manager = page.getByRole("dialog");
   await manager.getByLabel("名称", { exact: true }).fill("隔离验收主题");
   await manager

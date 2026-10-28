@@ -8,7 +8,7 @@ test("stream failure, stop receiving, rotation and no-Range fallback retain clea
   });
   let files = 0;
   await page.route("**/api/paper/c-0/file", async (route) => {
-    files++;
+    if(route.request().method()==='GET')files++;
     const response = await route.fetch();
     const headers = { ...response.headers() };
     delete headers["accept-ranges"];
@@ -29,7 +29,8 @@ test("stream failure, stop receiving, rotation and no-Range fallback retain clea
         .data.some((v, i) => i % 4 !== 3 && v < 200),
     ),
   ).toBe(true);
-  await page.getByLabel("旋转", { exact: true }).click();
+  await page.getByRole("button", {name:"阅读更多操作",exact:true}).click();
+    await page.getByLabel("旋转", { exact: true }).click();
   await expect(page.locator(".pdf-panel .textLayer").first()).toContainText(
     "中文文本选择",
   );

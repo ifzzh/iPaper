@@ -24,12 +24,7 @@ _PREFLIGHT_LOCK = threading.Lock()
 _PREFLIGHT_OWNERS = set()
 
 
-def file_digest(path):
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024**2), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+from .digest_cache import file_digest
 
 
 class ProcessingPipeline:

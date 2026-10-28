@@ -39,6 +39,7 @@ test("page and zoom survive settled rendering, navigation and a fresh context", 
     })
     .toEqual({ page: 5, zoom: 0.75 });
   for (let turn = 0; turn < 4; turn++) {
+    await page.getByRole("button", {name:"阅读更多操作",exact:true}).click();
     await page.getByLabel("旋转", { exact: true }).click();
     await page.waitForTimeout(250);
     await expect

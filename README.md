@@ -22,6 +22,8 @@ A version number or screen on the development branch does not establish release 
 
 [Release 1.4.0](https://github.com/ifzzh/iPaper/releases/tag/v1.4.0) is deployed and verified. It adds full-document search, outlines and versioned bookmarks, cached paragraph translations in the original PDF, explicit selection translation, and figure/table/formula enlargement. No OCR or model request is triggered by searching or reading cached results. See [reading tools and limits](docs/development/reading-tools.md). That release uses Web 1.4.0 with Workers 1.2.0.
 
+Web 1.15.0 refines library work surfaces, reading navigation and contextual controls. It reduces repeated PDF loading with authenticated short-lived in-memory reuse, prioritizes the reading page and validates cached file digests against filesystem changes. Workers remain 1.2.1. See [release notes](docs/releases/v1.15.0.md) and [performance limits](docs/development/performance.md).
+
 Web 1.14.0 adds summary-first library organization, publisher metadata recovery, card/list views, leaner PDF rendering, coalesced background reads and compressed static assets. Its security dependency refresh uses Python 3.11–3.13 (Docker: 3.12) and Workers 1.2.1. See [release notes](docs/releases/v1.14.0.md).
 
 Web 1.13.7 keeps the note save queue and unresolved conflicts across reader/panel switches, preserves typing during conflict decisions, honours rate-limit waiting without recursion, and revisits the exact PDF or structured-language source of an excerpt. Verification and release availability are recorded in the [release notes](docs/releases/v1.13.7.md). Both Workers remain at 1.2.0.

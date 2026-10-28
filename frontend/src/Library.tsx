@@ -303,6 +303,7 @@ export function Library({
               {activeFilters > 0 ? ` · 已筛选 ${activeFilters} 项` : ""}
             </p>
           </div>
+          <button className="library-organize-button" onClick={()=>setOrganizationSelection({selection:criteria})}><Sparkles size={16}/>智能整理</button>
         </header>
         <div className="scope-tabs" role="tablist" aria-label="文献范围">
           {[
@@ -327,7 +328,6 @@ export function Library({
             <button aria-label="列表视图" aria-pressed={!cardView} onClick={()=>onPreferences({libraryView:'list'})}><List size={16}/><span>列表</span></button>
             <button aria-label="卡片视图" aria-pressed={cardView} onClick={()=>onPreferences({libraryView:'cards'})}><LayoutGrid size={16}/><span>卡片</span></button>
           </div>
-          <button onClick={()=>setOrganizationSelection({selection:criteria})}><Sparkles size={15}/>智能整理</button>
           <label className="search">
             <Search size={16} />
             <input
@@ -543,7 +543,7 @@ export function Library({
                     <span className="asset-state warn">分析失败</span>
                   )}
                 </div>
-                <p className={"paper-summary " + (!p.summary?'paper-summary-empty':'')}>{p.summary || '暂无中文概述 · 可通过智能整理生成'}</p>
+                {(p.summary||cardView)&&<p className={"paper-summary "+(!p.summary?"paper-summary-empty":"")}>{p.summary||"暂无中文概述"}</p>}
               </div>
               <div className="paper-row-aside">
                 {cardView&&<button className="text-button" onClick={e=>{e.stopPropagation();onRead(p);}}><BookOpen size={15}/>打开阅读</button>}
@@ -633,12 +633,12 @@ export function Library({
         />
         <div className="panel-heading">
           <div>
-            <span className="eyebrow">PAPER DETAILS</span>
             <h2>论文详情</h2>
           </div>
           <button className="mobile-only" onClick={() => onSelect("")}>
             返回列表
           </button>
+          <button className="icon-button detail-close" aria-label="关闭详情" title="关闭详情" onClick={()=>onSelect("")}><X size={16}/></button>
         </div>
         {paper ? (
           <div className="details-scroll">
