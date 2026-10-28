@@ -77,8 +77,11 @@ def run(service, item_id, owner):
         checkpoint = json.loads(item['checkpoint_json'])
         linked = checkpoint.get('linkedItem')
         if linked:
-            target = db.execute('SELECT status FROM keyword_items WHERE owner_id=? AND id=?', (owner, linked)).fetchone()
+            target = db.execute('SELECT status,error FROM keyword_items WHERE owner_id=? AND id=?', (owner, linked)).fetchone()
             if target and target[0] in {'queued','running'}:
+                return
+            if target and target[0] not in {'completed','reused','needs_content','stale'}:
+                db.execute('UPDATE keyword_items SET status=?,error=?,updated_at=? WHERE owner_id=? AND id=?', (target[0],target[1],stamp(),owner,item_id))
                 return
         if db.execute("SELECT 1 FROM keyword_items WHERE owner_id=? AND status='running'", (owner,)).fetchone():
             return

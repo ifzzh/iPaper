@@ -222,3 +222,19 @@ def test_deleting_paper_removes_its_summary_only(organized):
     run_as_identity(Identity(u['id'],u['username'],u['role']),PaperDAO.delete_paper,'a-0')
     with s.store(u['id']).connection() as db:
         assert db.execute('SELECT count(*) FROM library_summaries').fetchone()[0]==0
+
+
+def test_overlapping_batches_do_not_repeat_an_unknown_attempt(organized):
+    _,s,c,h,u,o,calls=organized
+    s.model_request=Mock(return_value={'status':'unknown'})
+    _,first=start(s,u['id'])
+    preview=s.prepare(u['id'],['a-0','a-1'],'organize')
+    second=s.create(u['id'],['a-0','a-1'],'organize',preview['previewKey'])
+    assert run_batch(s,u['id'],first)['counts']=={'interrupted':1}
+    with s.store(u['id']).connection() as db:
+        child=db.execute("SELECT id FROM keyword_items WHERE batch_id=? AND paper_id='a-0'",(second,)).fetchone()[0]
+    s.run(child,u['id'])
+    with s.store(u['id']).connection() as db:
+        row=db.execute('SELECT status,error,requests FROM keyword_items WHERE id=?',(child,)).fetchone()
+        assert tuple(row)==('interrupted','model_result_unknown',0)
+    assert s.model_request.call_count==1
