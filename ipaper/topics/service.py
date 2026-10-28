@@ -43,7 +43,7 @@ class TopicService:
         # its pending queue. This reader makes no provider requests.
         return self.reader.source(owner, paper_id)
 
-    def create(self, owner, paper_ids):
+    def create(self, owner, paper_ids, *, generation=None):
         if (
             not isinstance(paper_ids, list)
             or not 1 <= len(paper_ids) <= 5000
@@ -51,7 +51,7 @@ class TopicService:
         ):
             raise TopicError("invalid_topic_selection")
         ids = list(dict.fromkeys(paper_ids))
-        key = fingerprint(ids)
+        key = fingerprint(ids) if generation is None else fingerprint([ids,generation])
         store = self.store(owner)
         with store.connection(write=True) as db:
             for paper in ids:
@@ -196,6 +196,12 @@ class TopicService:
         store = self.store(owner)
         try:
             item = self.check(owner, item_id)
+            with store.connection() as db:
+                if db.execute("SELECT 1 FROM keyword_items i JOIN keyword_batches b ON b.id=i.batch_id WHERE i.owner_id=? AND i.paper_id=? AND b.method='organize' AND i.status IN ('queued','running')", (owner,item['paper_id'])).fetchone():
+                    return
+                dependency=db.execute("SELECT i.status FROM organization_topic_dependencies d JOIN keyword_items i ON i.id=d.keyword_item_id AND i.owner_id=d.owner_id WHERE d.owner_id=? AND d.batch_id=?", (owner,item['batch_id'])).fetchone()
+                if dependency and dependency[0] not in {'completed','reused'}:
+                    raise TopicError('cancelled')
             with store.connection(write=True) as db:
                 if db.execute(
                     "SELECT 1 FROM topic_items WHERE owner_id=? AND status='running' AND id<>?",
@@ -312,6 +318,13 @@ class TopicService:
                 )
             )
         for owner, paper_id, generation in events:
+            with self.store(owner).connection() as db:
+                preference=db.execute("SELECT value FROM user_settings_v2 WHERE owner_id=? AND key='organization_v1'", (owner,)).fetchone()
+                if preference and json.loads(preference[0]).get('automatic'):
+                    paper=db.execute('SELECT * FROM papers WHERE owner_id=? AND id=?',(owner,paper_id)).fetchone()
+                    from ipaper.keywords.organize import saved_summary
+                    if paper and not saved_summary(db,owner,unpack(paper)):
+                        continue
             if self.stop.is_set():
                 return
             with self.store(owner).connection() as db:

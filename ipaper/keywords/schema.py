@@ -58,3 +58,15 @@ CREATE TABLE IF NOT EXISTS library_selections (
  query_json TEXT NOT NULL, created_at REAL NOT NULL
 );
 """
+
+SCHEMA += """
+CREATE TABLE IF NOT EXISTS library_summaries (
+ owner_id TEXT NOT NULL, paper_id TEXT NOT NULL, summary TEXT NOT NULL,
+ source_signature TEXT NOT NULL, input_key TEXT NOT NULL, model TEXT NOT NULL, updated_at TEXT NOT NULL,
+ PRIMARY KEY(owner_id,paper_id)
+);
+CREATE TABLE IF NOT EXISTS organization_topic_dependencies (
+ owner_id TEXT NOT NULL, batch_id TEXT NOT NULL, keyword_item_id TEXT NOT NULL,
+ PRIMARY KEY(owner_id,batch_id)
+);
+"""

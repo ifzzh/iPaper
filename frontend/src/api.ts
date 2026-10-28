@@ -45,6 +45,8 @@ const processingErrors: Record<string, string> = {
   paper_tag_limit: "这篇论文已达到 128 个标签，请先移除不需要的标签。",
   library_selection_expired: "全部匹配的选择已过期，请重新选择。",
   keyword_nothing_to_retry: "没有需要重试的任务。",
+  organization_content_required: "内容不足，请先补全论文信息或提供已有正文。",
+  organization_summary_invalid: "未得到有效中文概述，后续标签整理已停止。",
   keyword_cancelled: "任务已取消，尚未开始的请求不会继续。",
   keyword_interrupted: "本地整理被中断，可重新整理。",
 
@@ -207,6 +209,7 @@ export type User = {
   must_change_password?: boolean;
 };
 export type Paper = {
+  summary?: string;
   tags?: { id: string; name: string }[];
   id: string;
   title: string;
@@ -256,6 +259,7 @@ export function paperFrom(data: unknown): Paper {
     authors: text(p.authors),
     year: text(p.year),
     abstract: text(p.abstract),
+    summary: text(p.summary),
     starred: p.starred === true,
     translated: p.has_chinese_version === true,
     translation: text(p.translation_status),

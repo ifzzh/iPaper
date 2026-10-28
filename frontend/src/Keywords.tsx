@@ -1,3 +1,4 @@
+import {OrganizationDialog} from "./Organization";
 import { useEffect, useRef, useState } from "react";
 import { Plus, X, Tags, Sparkles, Undo2, Pencil, Trash2 } from "lucide-react";
 import { api, useResource, Modal, Field, Status, dateText } from "./ui";
@@ -828,7 +829,7 @@ export function KeywordTask({ id }: { id: string }) {
       {r.data && (
         <>
           <p>
-            {r.data.method === "model" ? "模型增强" : "本地整理"} ·{" "}
+            {r.data.method === "organize" ? "概述后智能整理" : r.data.method === "model" ? "模型增强" : "本地整理"} ·{" "}
             {statuses[r.data.status]} · {r.data.completed} / {r.data.total}
           </p>
           <div className="keyword-counts">
@@ -856,7 +857,7 @@ export function KeywordTask({ id }: { id: string }) {
               disabled={r.data.status === "running"}
               onClick={async () => {
                 try {
-                  if (r.data.method === "model") {
+                  if (["model","organize"].includes(r.data.method)) {
                     const all = [];
                     let cursor = 0;
                     do {
@@ -931,7 +932,8 @@ export function KeywordTask({ id }: { id: string }) {
           </div>
         </>
       )}
-      {retrySelection && (
+      {retrySelection && r.data?.method === 'organize' && <OrganizationDialog selection={retrySelection} onClose={()=>{setRetrySelection(null);r.refresh();details.refresh();}} onChanged={()=>{r.refresh();details.refresh();}}/>}
+      {retrySelection && r.data?.method !== 'organize' && (
         <KeywordBatchDialog
           initialMethod="model"
           selection={retrySelection}

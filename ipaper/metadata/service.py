@@ -146,6 +146,10 @@ class MetadataService:
             clue=clues(current['fields'],inspection,current['originalTitle'])
             schedule=checkpoint.get('schedule') or queries(clue)
             records=checkpoint.get('records',[]);index=checkpoint.get('index',0);attempts=checkpoint.get('attempts',{})
+            if clue.get('usenix') and schedule and schedule[0][0]!='usenix':
+                # A resumed legacy filename search is not authoritative when
+                # the original PDF now supplies a verified publisher URL.
+                schedule=queries(clue);records=[];index=0;attempts={}
             checkpoint.update(schedule=schedule,records=records,index=index,attempts=attempts,sha256=sha)
             def before():
                 check()

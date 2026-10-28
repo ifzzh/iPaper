@@ -55,7 +55,7 @@ def register_keyword_routes(app, service):
         with store.connection() as conn:
             return selected_ids(conn, store.owner, data)
 
-    def public_paper(p):
+    def public_paper(p, db):
         obj = Paper.from_dict(p).to_dict()
         # Public projection: never expose server file paths or free-form extra.
         public = {
@@ -81,6 +81,8 @@ def register_keyword_routes(app, service):
                 "category_id",
             )
         }
+        from .organize import saved_summary
+        public["summary"] = saved_summary(db, current_user_id(), p)
         return public
 
     @bp.get("/api/library/index")
@@ -89,7 +91,7 @@ def register_keyword_routes(app, service):
         # walk, PDF inspection or content generation is performed by this read.
         store = service.store()
         with store.connection() as db:
-            return jsonify([public_paper(p) for p in members(db, store.owner, {})])
+            return jsonify([public_paper(p, db) for p in members(db, store.owner, {})])
 
     @bp.get("/api/library/navigation")
     def navigation():
@@ -132,7 +134,7 @@ def register_keyword_routes(app, service):
             chosen = rows[(page - 1) * limit : page * limit]
             output = []
             for p in chosen:
-                public = public_paper(p)
+                public = public_paper(p, db)
                 public["tags"] = [
                     {"id": r[0], "name": r[1]}
                     for r in db.execute(
@@ -228,11 +230,15 @@ def register_keyword_routes(app, service):
             )
         )
 
+    @bp.route("/api/organization/settings", methods=["GET", "PUT"])
+    def organization_settings():
+        return jsonify(service.organization_settings(current_user_id(), body({"automatic"}) if request.method=="PUT" else None))
+
     @bp.post("/api/keywords/preview")
     def preview():
         data = body({"paperIds", "selectionId", "selection", "method", "inputScope"})
         method = data.get("method", "local")
-        if method not in {"local", "model"}:
+        if method not in {"local", "model", "organize"}:
             raise KeywordError("invalid_keyword_method")
         paper_ids = ids(data)
         if method == "local":
@@ -312,7 +318,7 @@ def register_keyword_routes(app, service):
         data = body({"previewKey", "inputScope"})
         store = service.store()
         prior = store.batch(job_id, limit=0)
-        if prior["method"] == "model":
+        if prior["method"] in {"model", "organize"}:
             with store.connection() as db:
                 paper_ids = [
                     r[0]
@@ -324,7 +330,7 @@ def register_keyword_routes(app, service):
             bid = service.create(
                 store.owner,
                 paper_ids,
-                "model",
+                prior["method"],
                 data.get("previewKey"),
                 data.get("inputScope", "available"),
             )

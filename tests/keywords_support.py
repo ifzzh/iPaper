@@ -1,6 +1,7 @@
 """Explicit synthetic keyword supplier, installed only by browser test harness."""
 
 import json
+import os
 from flask import jsonify
 
 
@@ -38,6 +39,8 @@ def install(application):
     def model(profile, messages, limit, deadline):
         calls.append({"outputLimit": limit, "deadline": deadline})
         text = messages[1]["content"].split(": ", 1)[-1].split("\n")[0]
+        if os.getenv('IPAPER_BROWSER_ORGANIZE')=='1' and '"summary"' in messages[0]['content']:
+            return {'status':'completed','text':json.dumps({'summary':'这篇论文研究图神经网络如何用于分子性质预测，通过沿分子键传递节点信息来构建表征，并使用对比学习获得更稳定的分子表示，进一步在不同化学骨架划分下检验模型的泛化能力。'},ensure_ascii=False)}
         return {
             "status": "completed",
             "text": json.dumps(
@@ -61,3 +64,7 @@ def install(application):
         return jsonify(calls=calls, modelRequests=len(calls), mineruRequests=0)
 
     service.start()
+    if os.getenv('IPAPER_BROWSER_ORGANIZE')=='1':
+        topics=application.extensions['topics']
+        for uid in [owner,*others]:topics.settings(uid,{'automatic':False})
+        topics.start()

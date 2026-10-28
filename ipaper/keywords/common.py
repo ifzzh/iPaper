@@ -36,4 +36,4 @@ TERMINAL = {
     "deleted",
 }
 METHOD_VERSION = "phrases-1"
-PROMPT_VERSION = "keyword-enhance-1"
+PROMPT_VERSION = "keyword-enhance-2"

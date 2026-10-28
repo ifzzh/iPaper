@@ -1068,6 +1068,7 @@ def register_routes():
     from ipaper.topics.routes import register_topic_routes
     topic_service = TopicService(DB_PATH, processing_service)
     register_topic_routes(app, topic_service)
+    keyword_service.topics = topic_service
     processing_service.initialize_ifzzh()
     if app.config.get("IPAPER_START_BACKGROUND_TASKS", False):
         processing_service.start()

@@ -617,7 +617,7 @@ class KeywordStore(MetadataStore):
         input_scope="available",
         generation=None,
     ):
-        if method not in {"local", "model"}:
+        if method not in {"local", "model", "organize"}:
             raise KeywordError("invalid_keyword_method")
         if not isinstance(paper_ids, list) or not paper_ids or len(paper_ids) > 5000:
             raise KeywordError("invalid_keyword_selection")
@@ -706,7 +706,7 @@ class KeywordStore(MetadataStore):
             items = [
                 dict(r)
                 for r in db.execute(
-                    "SELECT i.id,i.paper_id,i.status,i.requests,i.error,i.updated_at,p.title FROM keyword_items i LEFT JOIN papers p ON p.id=i.paper_id AND p.owner_id=i.owner_id WHERE i.owner_id=? AND i.batch_id=? ORDER BY i.created_at,i.id LIMIT ? OFFSET ?",
+                    "SELECT i.id,i.paper_id,i.status,i.requests,i.error,i.updated_at,i.checkpoint_json,i.result_json,p.title FROM keyword_items i LEFT JOIN papers p ON p.id=i.paper_id AND p.owner_id=i.owner_id WHERE i.owner_id=? AND i.batch_id=? ORDER BY i.created_at,i.id LIMIT ? OFFSET ?",
                     (self.owner, batch_id, min(100, max(0, limit)), max(0, after)),
                 )
             ]

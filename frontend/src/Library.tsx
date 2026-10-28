@@ -1,3 +1,6 @@
+import {OrganizationDialog} from "./Organization";
+import {LibraryCover} from "./LibraryCover";
+import "./library-organization.css";
 import { TopicSidebar, TopicManager, PaperTopics, TopicBatchDialog } from "./Topics";
 import {
   TagChips,
@@ -16,6 +19,8 @@ import { ResizeHandle } from "./ResizeHandle";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
+  LayoutGrid,
+  List,
   Library as LibraryIcon,
   Star,
   Folder,
@@ -152,6 +157,8 @@ export function Library({
       string,
       unknown
     > | null>(null);
+  const [organizationSelection, setOrganizationSelection] = useState<Record<string,unknown>|null>(null);
+  const cardView = preferences.libraryView === "cards";
   const [topicRevision, setTopicRevision] = useState(0);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [topicFilter, setTopicFilter] = useState<string>(preferences.topicFilter || 'all');
@@ -214,8 +221,8 @@ export function Library({
   const visible: Paper[] = list.data.items.map(paperFrom),
     total: number = list.data.total;
   const paper =
-      items.find((p) => p.id === selected) ||
-      visible.find((p) => p.id === selected),
+      visible.find((p) => p.id === selected) ||
+      items.find((p) => p.id === selected),
     readIds = new Set(reading.data.map((p) => p.id));
   function changedKeywords() {
     list.refresh();
@@ -313,6 +320,11 @@ export function Library({
           ))}
         </div>
         <div className="list-toolbar">
+          <div className="library-view-toggle" aria-label="文献视图">
+            <button aria-label="列表视图" aria-pressed={!cardView} onClick={()=>onPreferences({libraryView:'list'})}><List size={16}/><span>列表</span></button>
+            <button aria-label="卡片视图" aria-pressed={cardView} onClick={()=>onPreferences({libraryView:'cards'})}><LayoutGrid size={16}/><span>卡片</span></button>
+          </div>
+          <button onClick={()=>setOrganizationSelection({selection:criteria})}><Sparkles size={15}/>智能整理</button>
           <label className="search">
             <Search size={16} />
             <input
@@ -408,6 +420,7 @@ export function Library({
         {checked.length > 0 && (
           <div className="batch-toolbar">
             <span>已选择 {checked.length} 篇</span>
+            <button onClick={()=>setOrganizationSelection(selectionId?{selectionId}:{paperIds:checked})}>生成概述并整理</button>
             <button onClick={() => setMetadataSelection({ paperIds: checked })}>
               补全信息
             </button>
@@ -461,7 +474,7 @@ export function Library({
             </button>
           </div>
         )}
-        <div className="paper-list">
+        <div className={"paper-list " + (cardView ? "library-cards" : "library-rows")}>
           {visible.map((p) => (
             <article
               className={"paper-row " + (selected === p.id ? "selected" : "")}
@@ -470,9 +483,10 @@ export function Library({
               onClick={() => onSelect(p.id)}
               onDoubleClick={() => onRead(p)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") onRead(p);
+                if (e.key === "Enter" && e.target === e.currentTarget) onRead(p);
               }}
             >
+              {cardView && <LibraryCover id={p.id} title={p.title}/>}
               <input
                 type="checkbox"
                 aria-label={"选择 " + p.title}
@@ -526,8 +540,10 @@ export function Library({
                     <span className="asset-state warn">分析失败</span>
                   )}
                 </div>
+                <p className={"paper-summary " + (!p.summary?'paper-summary-empty':'')}>{p.summary || '暂无中文概述 · 可通过智能整理生成'}</p>
               </div>
               <div className="paper-row-aside">
+                {cardView&&<button className="text-button" onClick={e=>{e.stopPropagation();onRead(p);}}><BookOpen size={15}/>打开阅读</button>}
                 <button
                   className={"icon-button " + (p.starred ? "starred" : "")}
                   aria-label={p.starred ? "取消收藏" : "收藏论文"}
@@ -648,6 +664,10 @@ export function Library({
               <BookOpen size={17} />
               打开阅读
             </button>
+            <section className="detail-section">
+              <div className="library-summary-heading"><h3>中文概述</h3><button className="text-button" onClick={()=>setOrganizationSelection({paperIds:[paper.id]})}><Sparkles size={14}/>智能整理</button></div>
+              <p className="paper-summary">{paper.summary || '先生成中文概述，再整理标签与研究主题。'}</p>
+            </section>
             <section className="detail-section">
               <div className="section-label">文献处理</div>
               <button
@@ -995,6 +1015,7 @@ export function Library({
           </div>,
           sidebarSlot,
         )}
+      {organizationSelection&&<OrganizationDialog selection={organizationSelection} onClose={()=>{setOrganizationSelection(null);list.refresh();onChanged();}} onChanged={()=>{list.refresh();catalog.refresh();setKeywordRevision(v=>v+1);setTopicRevision(v=>v+1);}}/>}
       {action === "topic-manager" && <TopicManager onClose={() => {setAction(""); setTopicRevision(v => v + 1); list.refresh();}}/>}
       {topicSelection && <TopicBatchDialog selection={topicSelection} onClose={() => setTopicSelection(null)} onChanged={() => {setTopicRevision(v => v + 1); list.refresh();}}/>}
     </div>

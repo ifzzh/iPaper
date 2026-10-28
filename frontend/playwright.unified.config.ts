@@ -19,6 +19,7 @@ export default defineConfig({
     "reading-tools.spec.ts",
     "metadata.spec.ts",
     "keywords.spec.ts",
+    "organization.spec.ts",
   ],
   use: {
     ...base.use,

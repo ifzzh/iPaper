@@ -11,7 +11,7 @@ from ipaper.environment import getenv
 from ipaper.security.outbound import OutboundPolicy, OutboundPolicyError
 from .model import MetadataError, encoded, fingerprint, normalized, doi, arxiv, safe_url
 
-ORIGINS={'arxiv':'https://export.arxiv.org','crossref':'https://api.crossref.org',
+ORIGINS={'usenix':'https://www.usenix.org','arxiv':'https://export.arxiv.org','crossref':'https://api.crossref.org',
          'dblp':'https://dblp.org','openreview':'https://api2.openreview.net','openreview_v1':'https://api.openreview.net'}
 _LOCKS={p:threading.Lock() for p in ORIGINS}
 
@@ -52,7 +52,7 @@ class BibliographicHTTP:
                         from ipaper.tools.basic_tools.arxiv_network import get_arxiv_requests_proxies
                         session.proxies.update(get_arxiv_requests_proxies(url) or {})
                     elif proxy: session.proxies.update({'http':proxy,'https':proxy})
-                    with session.get(url,params=params,headers={'User-Agent':'iPaper/1.5 (+https://github.com/ifzzh/iPaper)','Accept':'application/atom+xml' if provider=='arxiv' else 'application/json'},timeout=(5,15),allow_redirects=False,stream=True) as response:
+                    with session.get(url,params=params,headers={'User-Agent':'iPaper/1.5 (+https://github.com/ifzzh/iPaper)','Accept':'application/atom+xml' if provider=='arxiv' else 'text/html' if provider=='usenix' else 'application/json'},timeout=(5,15),allow_redirects=False,stream=True) as response:
                         if provider=='crossref':
                             try:
                                 limit=float(response.headers.get('X-Rate-Limit-Limit',1));interval=float(response.headers.get('X-Rate-Limit-Interval','1s').rstrip('s'))
@@ -71,7 +71,7 @@ class BibliographicHTTP:
                         elif response.status_code!=200:raise ProviderFailure('metadata_provider_rejected')
                         else:
                             content_type=response.headers.get('Content-Type','').lower()
-                            if not any(x in content_type for x in (('xml','atom') if provider=='arxiv' else ('json',))):raise ProviderFailure('metadata_invalid_response')
+                            if not any(x in content_type for x in (('xml','atom') if provider=='arxiv' else ('text/html',) if provider=='usenix' else ('json',))):raise ProviderFailure('metadata_invalid_response')
                             chunks=[];size=0;started=time.monotonic()
                             for chunk in response.iter_content(16384):
                                 self.check();size+=len(chunk)
@@ -79,7 +79,12 @@ class BibliographicHTTP:
                                 if time.monotonic()-started>20:raise ProviderFailure('metadata_timeout',retryable=True)
                                 chunks.append(chunk)
                             raw=b''.join(chunks)
-                            if provider=='arxiv':
+                            if provider=='usenix':
+                                from .publisher import usenix_payload
+                                data={**usenix_payload(raw.decode('utf-8',errors='replace')), 'url':url}
+                                if not data['citation'].get('title') or not data['citation'].get('author'):
+                                    raise ProviderFailure('metadata_invalid_response')
+                            elif provider=='arxiv':
                                 if b'<!DOCTYPE' in raw.upper() or b'<!ENTITY' in raw.upper():raise ProviderFailure('metadata_invalid_response')
                                 try:
                                     root=ET.fromstring(raw)
@@ -220,9 +225,15 @@ def clues(fields,inspection=None,original_title=''):
     result={'title':fields.get('title') or original_title,'authors':fields.get('authors',''),'year':fields.get('year',''),
             'doi':fields.get('doi',''),'arxiv_id':fields.get('arxiv_id',''),'arxiv_version':fields.get('arxiv_version',''),
             'header':header,'source_url':fields.get('source_url','')}
-    for link in [result['source_url']]:
+    from .publisher import usenix_path
+    links=[result['source_url'], *re.findall(r'https://www\.usenix\.org/conference/[a-z0-9-]+/presentation/[a-z0-9-]+',header)]
+    embedded=(inspection or {}).get('metadata',{}).get('title','').strip()
+    if embedded and len(normalized(embedded))>=8 and normalized(embedded) in normalized(header):
+        result['title']=embedded
+    for link in links:
         p=urlsplit(link);host=(p.hostname or '').lower()
-        if host in {'arxiv.org','export.arxiv.org'}:
+        if usenix_path(link):result['usenix']=usenix_path(link)
+        elif host in {'arxiv.org','export.arxiv.org'}:
             try:
                 base,version=arxiv(link)
                 if not result['arxiv_id'] or result['arxiv_id']==base:
@@ -252,6 +263,10 @@ def clues(fields,inspection=None,original_title=''):
 
 def queries(clue):
     output=[]
+    if clue.get('usenix'):
+        from .publisher import usenix_path
+        path=clue['usenix']
+        if usenix_path('https://www.usenix.org'+path):return [('usenix',path,{})]
     if clue.get('openreview'):
         if not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',clue['openreview']):return []
         return [('openreview','/notes',{'id':clue['openreview']})]
@@ -268,7 +283,9 @@ def queries(clue):
     return output
 
 
-PARSERS={'arxiv':arxiv_records,'crossref':crossref_records,'dblp':dblp_records,'openreview':openreview_records,'openreview_v1':openreview_records}
+from .publisher import usenix_records
+
+PARSERS={'usenix':usenix_records,'arxiv':arxiv_records,'crossref':crossref_records,'dblp':dblp_records,'openreview':openreview_records,'openreview_v1':openreview_records}
 
 
 def match(record,clue):

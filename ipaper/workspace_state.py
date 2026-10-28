@@ -65,7 +65,7 @@ def register_workspace_state(app):
                     data['activePaper'] = None
                 return jsonify(data)
             data = body()
-            if set(data) - {'tabs', 'activePaper', 'theme', 'categoryWidth', 'detailWidth', 'chatWidth', 'thumbnailOpen', 'navigationPanel', 'taskRefs', 'tabDocuments', 'readerResults', 'topicFilter', 'topicCollapsed', 'readingActivityOpen'}:
+            if set(data) - {'tabs', 'activePaper', 'theme', 'categoryWidth', 'detailWidth', 'chatWidth', 'thumbnailOpen', 'navigationPanel', 'taskRefs', 'tabDocuments', 'readerResults', 'topicFilter', 'topicCollapsed', 'readingActivityOpen', 'libraryView'}:
                 raise ValueError()
             topic_filter = data.get('topicFilter', 'all')
             collapsed = data.get('topicCollapsed', [])
@@ -102,6 +102,8 @@ def register_workspace_state(app):
                 if key in data and not _number(data[key], low, high):
                     raise ValueError()
             if 'thumbnailOpen' in data and not isinstance(data['thumbnailOpen'], bool):
+                raise ValueError()
+            if 'libraryView' in data and data['libraryView'] not in ('list','cards'):
                 raise ValueError()
             if 'readingActivityOpen' in data and not isinstance(data['readingActivityOpen'], bool):
                 raise ValueError()

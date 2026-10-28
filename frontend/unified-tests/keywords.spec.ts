@@ -142,7 +142,12 @@ test("explicit simulated model enhancement is reused without a second request", 
     await expect(page.getByRole("dialog")).toContainText(
       `最多 ${i === 0 ? 1 : 0} 次请求`,
     );
+    const submitted = page.waitForResponse(r => r.request().method()==='POST' && new URL(r.url()).pathname==='/api/keywords/jobs');
     await page.getByRole("button", { name: "开始整理", exact: true }).click();
+    const {id} = await (await submitted).json();
+    // The durable queue may be finishing an earlier local item. Wait for this
+    // exact task, rather than treating a 5-second panel refresh as completion.
+    await expect.poll(async () => (await (await page.request.get('/api/keywords/jobs/'+id)).json()).status,{timeout:45000}).toBe('completed');
     await page.goto(target);
     await expect(page.locator(".keyword-section")).toContainText(
       "合成标签验收",
