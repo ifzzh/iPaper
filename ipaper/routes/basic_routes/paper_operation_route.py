@@ -16,6 +16,7 @@ from ipaper.core.paper_store import PaperStore
 from ipaper.database.dao.user_data_dao import ReadingListDAO, ReadingHistoryDAO
 from ipaper.database.dao.document_job_dao import DocumentJobDAO
 from ipaper.document_worker.client import DocumentWorkerClient
+from ipaper.processing.digest_cache import file_digest
 from ipaper.security.paths import (
     PathSecurityError,
     ensure_confined,
@@ -303,6 +304,7 @@ def register_paper_operation_routes(
                 file_path,
                 as_attachment=False,
                 mimetype="application/pdf",
+                etag=file_digest(file_path),
             )
         except FileNotFoundError:
             return jsonify({"error": "PDF file not found"}), 404

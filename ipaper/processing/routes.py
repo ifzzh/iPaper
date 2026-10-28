@@ -166,7 +166,7 @@ def register_processing_routes(app, service):
             path.relative_to(user_storage_root(pipeline.store.papers_root, pipeline.store.owner))
         if file_digest(path) != doc["sha256"]:
             raise ProcessingError("source_expired", 409)
-        return send_file(path, conditional=True, download_name="original.pdf", max_age=0)
+        return send_file(path, conditional=True, etag=doc["sha256"], download_name="original.pdf", max_age=0)
 
     @blueprint.route("/api/documents/<document_id>/reading-position", methods=["GET", "PUT"])
     def document_position(document_id):

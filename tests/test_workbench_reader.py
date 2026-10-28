@@ -1,4 +1,6 @@
 import json
+import hashlib
+import os
 from pathlib import Path
 import pytest
 from tests.workbench_support import make_workbench_fixture
@@ -22,6 +24,7 @@ def test_private_pdf_range_and_errors(reader):
     for suffix in ['file','chinese/file']:
         path=f'/api/paper/a-0/{suffix}'
         full=a.get(path);assert full.status_code==200
+        assert full.headers['ETag']=='"'+hashlib.sha256(full.data).hexdigest()+'"'
         head=a.head(path);assert head.status_code==200;assert not head.data
         assert head.headers['Content-Length']==str(len(full.data))
         partial=a.get(path,headers={'Range':'bytes=10-29'})
@@ -38,6 +41,22 @@ def test_private_pdf_range_and_errors(reader):
     assert a.get('/api/paper/unknown/file').status_code==404
     a.delete('/api/auth/session',headers={'X-CSRF-Token':csrf})
     assert a.get('/api/paper/a-0/file',headers={'Range':'bytes=0-10'}).status_code==401
+
+
+@pytest.mark.parametrize('suffix,filename',[('file','a-0.pdf'),('chinese/file','a-0.zh.dual.pdf')])
+def test_same_size_pdf_replacement_invalidates_head_and_if_match(reader,tmp_path,suffix,filename):
+    client=reader.test_client();login(client)
+    url='/api/paper/a-0/'+suffix
+    before=client.get(url);assert before.status_code==200
+    path=next(tmp_path.rglob(filename));info=path.stat()
+    changed=before.data[:-1]+bytes([before.data[-1]^1]);path.write_bytes(changed)
+    os.utime(path,ns=(info.st_atime_ns,info.st_mtime_ns))
+    head=client.head(url);assert head.status_code==200
+    assert head.headers['ETag']=='"'+hashlib.sha256(changed).hexdigest()+'"'
+    assert head.headers['ETag']!=before.headers['ETag']
+    assert client.get(url,headers={'If-Match':before.headers['ETag']}).status_code==412
+    response=client.get(url,headers={'If-Match':head.headers['ETag'],'Range':'bytes=0-9'})
+    assert response.status_code==206 and response.data==changed[:10]
 
 
 def test_real_chat_persistence_errors_and_isolation(reader):

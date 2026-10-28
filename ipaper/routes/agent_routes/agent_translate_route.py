@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List
 from flask import Response, jsonify, request, send_file, stream_with_context
 
 from ipaper.core.base_paper import Paper
+from ipaper.processing.digest_cache import file_digest
 from ipaper.core.paper_store import paper_store
 from ipaper.database.dao.translation_job_dao import TranslationJobDAO
 from ipaper.database.dao.settings_dao import SettingsDAO
@@ -550,7 +551,7 @@ def register_agent_translate_routes(
             return jsonify({"error": "unsafe_stored_path"}), 409
         if not chinese_path.exists():
             return jsonify({"error": "Chinese version file does not exist"}), 404
-        return send_file(str(chinese_path), as_attachment=False, mimetype="application/pdf")
+        return send_file(str(chinese_path), as_attachment=False, mimetype="application/pdf", etag=file_digest(chinese_path))
 
     if app.config.get("IPAPER_START_BACKGROUND_TASKS", False):
         threading.Thread(target=worker_client.run_cleanup_loop, daemon=True).start()

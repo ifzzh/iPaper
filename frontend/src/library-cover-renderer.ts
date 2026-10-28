@@ -26,7 +26,7 @@ export function renderCover(id:string,canvas:HTMLCanvasElement,signal:AbortSigna
    canvas.getContext('2d')!.drawImage(cached.canvas,0,0);return;
   }
   if(cached){bytes-=cached.canvas.width*cached.canvas.height*4;cache.delete(id);}
-  const task=pdfDocument({url,withCredentials:true,
+  const task=pdfDocument({url,withCredentials:true,httpHeaders:etag?{'If-Match':etag}:undefined,
    disableAutoFetch:true,disableStream:true,rangeChunkSize:262144,maxImageSize:2000000,
    cMapUrl:'/static/workbench/pdfjs/cmaps/',cMapPacked:true,standardFontDataUrl:'/static/workbench/pdfjs/standard_fonts/'});
   const cancel=()=>{void task.destroy();};signal.addEventListener('abort',cancel,{once:true});
