@@ -1,21 +1,18 @@
 {
-  "release": "1.13.7",
+  "release": "1.14.0",
   "web": {
-    "tag": "1.13.7",
+    "tag": "1.14.0",
     "publish": true,
-    "repository": "ifzzh520/ipaper",
-    "digest": "sha256:635e8a2e754b814d1a67af6f359989e452c5f862dc339a4d3aefb6bc6b14eb60"
+    "repository": "ifzzh520/ipaper"
   },
   "translation_worker": {
-    "tag": "1.2.0",
-    "publish": false,
-    "repository": "ifzzh520/ipaper-translation-worker",
-    "digest": "sha256:a5fa3b4316802c15e99a7387baa49604166fb6092a1aca34b8c5e34de3d52003"
+    "tag": "1.2.1",
+    "publish": true,
+    "repository": "ifzzh520/ipaper-translation-worker"
   },
   "document_worker": {
-    "tag": "1.2.0",
-    "publish": false,
-    "repository": "ifzzh520/ipaper-document-worker",
-    "digest": "sha256:2c501ad68bdfc2e282518a813c46e548f598b1af85acc1069058741a45587298"
+    "tag": "1.2.1",
+    "publish": true,
+    "repository": "ifzzh520/ipaper-document-worker"
   }
 }

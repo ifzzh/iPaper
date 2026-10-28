@@ -121,24 +121,24 @@ class ApplicationFactoryContractTests(unittest.TestCase):
         version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))[
             "project"
         ]["version"]
-        self.assertEqual(version, "1.13.7")
+        self.assertEqual(version, "1.14.0")
         lock = Path("uv.lock").read_text(encoding="utf-8")
-        self.assertIn('name = "ipaper"\nversion = "1.13.7"', lock)
+        self.assertIn('name = "ipaper"\nversion = "1.14.0"', lock)
         matrix = json.loads(
             Path("docker/release-components.json").read_text(encoding="utf-8")
         )
         self.assertEqual(matrix["release"], version)
-        self.assertEqual(matrix["web"]["tag"], "1.13.7")
-        self.assertEqual(matrix["translation_worker"]["tag"], "1.2.0")
-        self.assertFalse(matrix["translation_worker"]["publish"])
+        self.assertEqual(matrix["web"]["tag"], "1.14.0")
+        self.assertEqual(matrix["translation_worker"]["tag"], "1.2.1")
+        self.assertTrue(matrix["translation_worker"]["publish"])
         self.assertEqual(
-            matrix["document_worker"]["tag"], "1.2.0"
+            matrix["document_worker"]["tag"], "1.2.1"
         )
-        self.assertFalse(matrix["document_worker"]["publish"])
+        self.assertTrue(matrix["document_worker"]["publish"])
         dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
-        self.assertIn("ARG APP_VERSION=1.13.7", dockerfile)
-        self.assertIn("ARG TRANSLATION_WORKER_VERSION=1.2.0", dockerfile)
-        self.assertIn("ARG DOCUMENT_WORKER_VERSION=1.2.0", dockerfile)
+        self.assertIn("ARG APP_VERSION=1.14.0", dockerfile)
+        self.assertIn("ARG TRANSLATION_WORKER_VERSION=1.2.1", dockerfile)
+        self.assertIn("ARG DOCUMENT_WORKER_VERSION=1.2.1", dockerfile)
         compose = Path("docker-compose.yaml").read_text(encoding="utf-8")
         repositories = {
             "web": "ifzzh520/ipaper",

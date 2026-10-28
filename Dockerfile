@@ -76,7 +76,7 @@ RUN apt-get -o Acquire::http::Proxy="false" -o Acquire::https::Proxy="false" upd
 
 FROM runtime-base AS translation-worker
 
-ARG TRANSLATION_WORKER_VERSION=1.2.0
+ARG TRANSLATION_WORKER_VERSION=1.2.1
 ARG VCS_REF=unknown
 
 ENV HOME=/tmp \
@@ -105,7 +105,7 @@ CMD ["python", "-m", "ipaper.translation_worker"]
 
 FROM runtime-base AS document-worker
 
-ARG DOCUMENT_WORKER_VERSION=1.2.0
+ARG DOCUMENT_WORKER_VERSION=1.2.1
 ARG VCS_REF=unknown
 
 ENV HOME=/tmp \
@@ -133,7 +133,7 @@ CMD ["python", "-m", "ipaper.document_worker"]
 
 FROM runtime-base AS runtime
 
-ARG APP_VERSION=1.13.7
+ARG APP_VERSION=1.14.0
 ARG VCS_REF=unknown
 ARG ARXIV_PROXY=
 ARG ARXIV_API_PROXY=

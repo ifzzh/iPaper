@@ -1,7 +1,7 @@
 name: ipaper
 services:
   ipaper:
-    image: ifzzh520/ipaper:1.13.7@sha256:635e8a2e754b814d1a67af6f359989e452c5f862dc339a4d3aefb6bc6b14eb60
+    image: ifzzh520/ipaper:1.14.0
     container_name: ipaper
     ports:
       - "127.0.0.1:7191:7191"
@@ -68,7 +68,7 @@ services:
     restart: unless-stopped
 
   ipaper-translation-worker:
-    image: ifzzh520/ipaper-translation-worker:1.2.0@sha256:a5fa3b4316802c15e99a7387baa49604166fb6092a1aca34b8c5e34de3d52003
+    image: ifzzh520/ipaper-translation-worker:1.2.1
     container_name: ipaper-translation-worker
     environment:
       IPAPER_WORKER_JOBS_ROOT: /work/jobs
@@ -94,7 +94,7 @@ services:
 
   ipaper-document-worker:
     # Development release selection; production versions are pinned independently.
-    image: ifzzh520/ipaper-document-worker:1.2.0@sha256:2c501ad68bdfc2e282518a813c46e548f598b1af85acc1069058741a45587298
+    image: ifzzh520/ipaper-document-worker:1.2.1
     container_name: ipaper-document-worker
     environment:
       IPAPER_DOCUMENT_JOBS_ROOT: /work/document-jobs
